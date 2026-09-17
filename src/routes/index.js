@@ -49,8 +49,8 @@ router.get('/douyin/spi/callback', (req, res) => {
 });
 
 /**
- * 抖音 SPI 回调接口 - POST 接收事件
- * 接收抖音推送的订单、评论等事件
+ * 抖音 Webhooks 回调接口 - POST 接收事件
+ * 文档: https://partner.open-douyin.com/docs/resource/zh-CN/local-life/connect/partner/basic-config/webhooks
  */
 router.post('/douyin/spi/callback', async (req, res) => {
   try {
@@ -59,38 +59,48 @@ router.post('/douyin/spi/callback', async (req, res) => {
 
     // 验证 token
     if (token !== config.douyin.spiToken) {
-      logger.warn('[SPI回调] Token 不匹配');
+      logger.warn('[Webhooks] Token 不匹配');
       return res.status(403).json({ error: 'Invalid token' });
     }
 
     const body = req.body;
+    const event = body.event;
 
-    logger.info('[SPI回调] 收到抖音事件推送', {
-      event: body.event,
-      tag: body.tag,
-      app_id: body.app_id,
+    logger.info('[Webhooks] 收到抖音事件', {
+      event: event,
+      client_key: body.client_key,
     });
 
+    // 处理 webhook 验证请求
+    if (event === 'verify_webhook') {
+      const challenge = body.content?.challenge;
+
+      logger.info('[Webhooks] 验证请求', { challenge });
+
+      // 按照文档要求,返回 challenge 值
+      return res.json({ challenge });
+    }
+
     // 记录原始数据用于调试
-    logger.debug('[SPI回调] 完整数据', body);
+    logger.debug('[Webhooks] 完整数据', body);
 
     // TODO: 后续实现具体的事件处理逻辑
-    // 根据 body.event 和 body.tag 判断事件类型
-    // 例如: order_status (订单状态), poi_order (到店订单), verify (核销) 等
+    // 根据 body.event 判断事件类型并处理
+    // 例如: 订单事件、核销事件、评价事件等
 
-    // 暂时返回成功,表示已接收
+    // 返回成功响应
     res.json({
       code: 0,
       message: 'success',
       data: {
         received: true,
-        event: body.event,
+        event: event,
         timestamp: new Date().toISOString()
       }
     });
 
   } catch (error) {
-    logger.error('[SPI回调] 处理失败', error.message);
+    logger.error('[Webhooks] 处理失败', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
