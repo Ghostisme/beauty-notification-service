@@ -50,16 +50,21 @@ router.get('/douyin/spi/callback', (req, res) => {
 
 /**
  * 抖音 SPI 事件回调接口 - POST
- * 接收抖音生活服务平台推送的各种事件(订单、核销、评价等)
- * 配置入口: 解决方案接入详情页 → 基础配置 → Webhooks配置
- * 文档: https://partner.open-douyin.com/docs/resource/zh-CN/local-life/connect/partner/basic-config/webhooks
+ * 同时支持两种验证方式:
+ * 1. SPI 签名验证 (x-life-sign header) - 用于 SPI 回调配置
+ * 2. Webhooks URL 验证 (verify_webhook 事件) - 用于 Webhooks 配置
+ *
+ * 文档:
+ * - SPI 签名: https://developer.open-douyin.com/docs/resource/zh-CN/local-life/develop/preparation/spi-signature-rules
+ * - Webhooks: https://partner.open-douyin.com/docs/resource/zh-CN/local-life/connect/partner/basic-config/webhooks
  */
 router.post('/douyin/spi/callback', async (req, res) => {
   try {
     const { token } = req.query;
     const config = require('../config');
+    const signatureUtil = require('../utils/douyin-signature');
 
-    // 验证 token
+    // 1. 首先验证自定义 token (基础安全)
     if (token !== config.douyin.spiToken) {
       logger.warn('[SPI回调] Token 不匹配');
       return res.status(403).json({ error: 'Invalid token' });
@@ -68,21 +73,44 @@ router.post('/douyin/spi/callback', async (req, res) => {
     const body = req.body;
     const event = body.event;
 
-    logger.info('[SPI回调] 收到抖音事件', {
-      event: event,
-      client_key: body.client_key,
-    });
-
-    // 处理 URL 验证请求
-    // 配置回调地址时,平台会发送此事件来验证 URL 可用性
+    // 2. 处理 Webhooks URL 验证请求 (配置 Webhooks 时触发)
     if (event === 'verify_webhook') {
       const challenge = body.content?.challenge;
 
-      logger.info('[SPI回调] URL验证请求', { challenge });
+      logger.info('[SPI回调] Webhooks URL验证请求', { challenge });
 
       // 按照文档要求,返回 challenge 值
       return res.json({ challenge });
     }
+
+    // 3. 验证 SPI 签名 (正式事件推送时需要)
+    const xLifeSign = req.headers['x-life-sign'];
+
+    if (xLifeSign) {
+      // 有签名,进行验证
+      const rawBody = JSON.stringify(body);
+      const isValidSignature = signatureUtil.verifyHeaderSignature(
+        req.headers,
+        req.query,
+        rawBody
+      );
+
+      if (!isValidSignature) {
+        logger.warn('[SPI回调] 签名验证失败');
+        return res.status(403).json({ error: 'Invalid signature' });
+      }
+
+      logger.info('[SPI回调] 签名验证通过');
+    } else {
+      logger.debug('[SPI回调] 未提供签名,仅使用 token 验证');
+    }
+
+    // 4. 记录接收到的事件
+    logger.info('[SPI回调] 收到抖音事件', {
+      event: event,
+      client_key: body.client_key,
+      has_signature: !!xLifeSign,
+    });
 
     // 记录原始数据用于调试
     logger.debug('[SPI回调] 完整数据', body);
