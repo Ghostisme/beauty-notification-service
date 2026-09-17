@@ -113,6 +113,17 @@ class Logger {
     }
     this.writeToFile('DEBUG', message, data);
   }
+
+  /**
+   * Success级别日志
+   */
+  success(message, data) {
+    console.log(`[SUCCESS] ${this.getTimestamp()} ${message}`);
+    if (data) {
+      console.log(this.formatData(data));
+    }
+    this.writeToFile('SUCCESS', message, data);
+  }
 }
 
 module.exports = new Logger();
