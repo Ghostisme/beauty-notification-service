@@ -23,7 +23,8 @@ router.get('/health', (req, res) => {
 
 /**
  * 抖音 SPI 回调接口 - GET 验证
- * 用于验证 SPI 配置是否正确
+ * 配置路径: 开发配置 → SPI回调
+ * 文档: https://developer.open-douyin.com/docs/resource/zh-CN/local-life/develop/preparation/spi-signature-rules
  */
 router.get('/douyin/spi/callback', (req, res) => {
   const { token } = req.query;
@@ -31,11 +32,11 @@ router.get('/douyin/spi/callback', (req, res) => {
 
   // 验证 token
   if (token !== config.douyin.spiToken) {
-    logger.warn('[SPI验证] Token 不匹配', { receivedToken: token });
+    logger.warn('[SPI回调] Token 不匹配', { receivedToken: token });
     return res.status(403).json({ error: 'Invalid token' });
   }
 
-  logger.info('[SPI验证] Token 验证通过');
+  logger.info('[SPI回调] Token 验证通过');
 
   // 返回成功响应
   res.json({
@@ -49,14 +50,10 @@ router.get('/douyin/spi/callback', (req, res) => {
 });
 
 /**
- * 抖音 SPI 事件回调接口 - POST
- * 同时支持两种验证方式:
- * 1. SPI 签名验证 (x-life-sign header) - 用于 SPI 回调配置
- * 2. Webhooks URL 验证 (verify_webhook 事件) - 用于 Webhooks 配置
- *
- * 文档:
- * - SPI 签名: https://developer.open-douyin.com/docs/resource/zh-CN/local-life/develop/preparation/spi-signature-rules
- * - Webhooks: https://partner.open-douyin.com/docs/resource/zh-CN/local-life/connect/partner/basic-config/webhooks
+ * 抖音 SPI 回调接口 - POST
+ * 配置路径: 开发配置 → SPI回调
+ * 接收平台主动调用的业务事件,必须验证签名
+ * 文档: https://developer.open-douyin.com/docs/resource/zh-CN/local-life/develop/preparation/spi-signature-rules
  */
 router.post('/douyin/spi/callback', async (req, res) => {
   try {
@@ -64,60 +61,48 @@ router.post('/douyin/spi/callback', async (req, res) => {
     const config = require('../config');
     const signatureUtil = require('../utils/douyin-signature');
 
-    // 1. 首先验证自定义 token (基础安全)
+    // 1. 验证自定义 token (基础安全)
     if (token !== config.douyin.spiToken) {
       logger.warn('[SPI回调] Token 不匹配');
       return res.status(403).json({ error: 'Invalid token' });
     }
 
-    const body = req.body;
-    const event = body.event;
-
-    // 2. 处理 Webhooks URL 验证请求 (配置 Webhooks 时触发)
-    if (event === 'verify_webhook') {
-      const challenge = body.content?.challenge;
-
-      logger.info('[SPI回调] Webhooks URL验证请求', { challenge });
-
-      // 按照文档要求,返回 challenge 值
-      return res.json({ challenge });
-    }
-
-    // 3. 验证 SPI 签名 (正式事件推送时需要)
+    // 2. 验证 SPI 签名 (必须)
     const xLifeSign = req.headers['x-life-sign'];
 
-    if (xLifeSign) {
-      // 有签名,进行验证
-      const rawBody = JSON.stringify(body);
-      const isValidSignature = signatureUtil.verifyHeaderSignature(
-        req.headers,
-        req.query,
-        rawBody
-      );
-
-      if (!isValidSignature) {
-        logger.warn('[SPI回调] 签名验证失败');
-        return res.status(403).json({ error: 'Invalid signature' });
-      }
-
-      logger.info('[SPI回调] 签名验证通过');
-    } else {
-      logger.debug('[SPI回调] 未提供签名,仅使用 token 验证');
+    if (!xLifeSign) {
+      logger.warn('[SPI回调] 缺少签名 header');
+      return res.status(403).json({ error: 'Missing signature' });
     }
 
-    // 4. 记录接收到的事件
-    logger.info('[SPI回调] 收到抖音事件', {
+    const body = req.body;
+    const rawBody = JSON.stringify(body);
+    const isValidSignature = signatureUtil.verifyHeaderSignature(
+      req.headers,
+      req.query,
+      rawBody
+    );
+
+    if (!isValidSignature) {
+      logger.warn('[SPI回调] 签名验证失败');
+      return res.status(403).json({ error: 'Invalid signature' });
+    }
+
+    logger.info('[SPI回调] 签名验证通过');
+
+    // 3. 处理业务事件
+    const event = body.event;
+
+    logger.info('[SPI回调] 收到业务事件', {
       event: event,
       client_key: body.client_key,
-      has_signature: !!xLifeSign,
     });
 
     // 记录原始数据用于调试
     logger.debug('[SPI回调] 完整数据', body);
 
-    // TODO: 后续实现具体的事件处理逻辑
-    // 根据 body.event 判断事件类型并处理
-    // 例如: 订单事件、核销事件、评价事件等
+    // TODO: 实现具体的 SPI 业务逻辑
+    // 根据 body.event 处理不同类型的回调
 
     // 返回成功响应
     res.json({
@@ -132,6 +117,66 @@ router.post('/douyin/spi/callback', async (req, res) => {
 
   } catch (error) {
     logger.error('[SPI回调] 处理失败', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * 抖音 Webhooks 回调接口 - POST
+ * 配置路径: 基础配置 → Webhooks配置
+ * 接收事件推送通知,配置时需要响应 verify_webhook 验证
+ * 文档: https://partner.open-douyin.com/docs/resource/zh-CN/local-life/connect/partner/basic-config/webhooks
+ */
+router.post('/douyin/webhooks/callback', async (req, res) => {
+  try {
+    const { token } = req.query;
+    const config = require('../config');
+
+    // 验证自定义 token
+    if (token !== config.douyin.spiToken) {
+      logger.warn('[Webhooks] Token 不匹配');
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+
+    const body = req.body;
+    const event = body.event;
+
+    // 处理 URL 验证请求
+    if (event === 'verify_webhook') {
+      const challenge = body.content?.challenge;
+
+      logger.info('[Webhooks] URL验证请求', { challenge });
+
+      // 按照文档要求,返回 challenge 值
+      return res.json({ challenge });
+    }
+
+    // 处理正常的事件推送
+    logger.info('[Webhooks] 收到事件推送', {
+      event: event,
+      client_key: body.client_key,
+    });
+
+    // 记录原始数据用于调试
+    logger.debug('[Webhooks] 完整数据', body);
+
+    // TODO: 实现具体的事件处理逻辑
+    // 根据 body.event 判断事件类型
+    // 例如: 订单事件、核销事件、评价事件等
+
+    // 返回成功响应
+    res.json({
+      code: 0,
+      message: 'success',
+      data: {
+        received: true,
+        event: event,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    logger.error('[Webhooks] 处理失败', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
