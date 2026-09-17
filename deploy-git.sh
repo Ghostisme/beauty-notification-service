@@ -16,7 +16,6 @@ NC='\033[0m' # No Color
 REPO_URL="https://github.com/Ghostisme/beauty-notification-service.git"
 PROJECT_DIR="/var/www/beauty-notification"
 PROJECT_NAME="beauty-notification"
-NODE_VERSION="18"
 
 # Git 加速配置 - 使用镜像站加速克隆
 USE_MIRROR="${USE_MIRROR:-true}"
@@ -48,30 +47,28 @@ if ! command -v git &> /dev/null; then
 fi
 echo -e "${GREEN}✅ Git 已安装: $(git --version)${NC}"
 
-# 检查 NVM
-if [ ! -d "$ORIGINAL_HOME/.nvm" ]; then
-    echo -e "${YELLOW}为用户 $ORIGINAL_USER 安装 NVM...${NC}"
-    su - $ORIGINAL_USER -c "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+# 检查 Node.js
+if ! command -v node &> /dev/null; then
+    echo -e "${RED}❌ 未检测到 Node.js,请先安装 Node.js${NC}"
+    exit 1
 fi
 
-# 加载 NVM
-export NVM_DIR="$ORIGINAL_HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+NODE_CURRENT_VERSION=$(node -v)
+echo -e "${GREEN}✅ Node.js 已安装: ${NODE_CURRENT_VERSION}${NC}"
 
-echo -e "${GREEN}✅ NVM 已安装${NC}"
-
-# 安装 Node.js
-echo -e "${YELLOW}安装 Node.js ${NODE_VERSION}...${NC}"
-su - $ORIGINAL_USER -c ". ~/.nvm/nvm.sh && nvm install $NODE_VERSION && nvm use $NODE_VERSION && nvm alias default $NODE_VERSION"
-
-echo -e "${GREEN}✅ Node.js 安装完成${NC}"
+# 检查 npm
+if ! command -v npm &> /dev/null; then
+    echo -e "${RED}❌ 未检测到 npm,请先安装 npm${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ npm 已安装: $(npm -v)${NC}"
 
 # 安装 PM2
-if ! su - $ORIGINAL_USER -c "command -v pm2" &> /dev/null; then
+if ! command -v pm2 &> /dev/null; then
     echo -e "${YELLOW}安装 PM2...${NC}"
-    su - $ORIGINAL_USER -c ". ~/.nvm/nvm.sh && npm install -g pm2"
+    npm install -g pm2
 fi
-echo -e "${GREEN}✅ PM2 已安装${NC}"
+echo -e "${GREEN}✅ PM2 已安装: $(pm2 -v)${NC}"
 
 echo ""
 echo -e "${GREEN}==> 步骤 2: 克隆/更新代码${NC}"
@@ -141,7 +138,7 @@ echo -e "${GREEN}==> 步骤 4: 安装依赖${NC}"
 echo ""
 
 cd $PROJECT_DIR
-su - $ORIGINAL_USER -c "cd $PROJECT_DIR && . ~/.nvm/nvm.sh && npm install --production"
+npm install --production
 
 echo -e "${GREEN}✅ 依赖安装完成${NC}"
 
@@ -150,14 +147,15 @@ echo -e "${GREEN}==> 步骤 5: 配置 PM2${NC}"
 echo ""
 
 # 停止旧进程
-su - $ORIGINAL_USER -c ". ~/.nvm/nvm.sh && pm2 delete $PROJECT_NAME" 2>/dev/null || true
+pm2 delete $PROJECT_NAME 2>/dev/null || true
 
 # 启动新进程
-su - $ORIGINAL_USER -c "cd $PROJECT_DIR && . ~/.nvm/nvm.sh && pm2 start ecosystem.config.js"
+cd $PROJECT_DIR
+pm2 start ecosystem.config.js
 
 # 设置开机自启
-su - $ORIGINAL_USER -c ". ~/.nvm/nvm.sh && pm2 startup systemd -u $ORIGINAL_USER --hp $ORIGINAL_HOME" | grep -v "^PM2" | bash || true
-su - $ORIGINAL_USER -c ". ~/.nvm/nvm.sh && pm2 save"
+pm2 startup systemd -u $ORIGINAL_USER --hp $ORIGINAL_HOME | grep -v "^PM2" | bash || true
+pm2 save
 
 echo -e "${GREEN}✅ PM2 配置完成${NC}"
 
