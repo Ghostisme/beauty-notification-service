@@ -47,28 +47,75 @@ if ! command -v git &> /dev/null; then
 fi
 echo -e "${GREEN}✅ Git 已安装: $(git --version)${NC}"
 
-# 检查 Node.js
-if ! command -v node &> /dev/null; then
+# 检查 Node.js - 尝试多个常见路径
+NODE_PATH=""
+if command -v node &> /dev/null; then
+    NODE_PATH=$(command -v node)
+elif [ -f "/usr/bin/node" ]; then
+    NODE_PATH="/usr/bin/node"
+elif [ -f "/usr/local/bin/node" ]; then
+    NODE_PATH="/usr/local/bin/node"
+fi
+
+if [ -z "$NODE_PATH" ]; then
     echo -e "${RED}❌ 未检测到 Node.js,请先安装 Node.js${NC}"
+    echo -e "${YELLOW}提示: 尝试以下命令检查 Node.js:${NC}"
+    echo -e "  which node"
+    echo -e "  ls -la /usr/bin/node"
+    echo -e "  ls -la /usr/local/bin/node"
     exit 1
 fi
 
-NODE_CURRENT_VERSION=$(node -v)
-echo -e "${GREEN}✅ Node.js 已安装: ${NODE_CURRENT_VERSION}${NC}"
+NODE_CURRENT_VERSION=$($NODE_PATH -v)
+echo -e "${GREEN}✅ Node.js 已安装: ${NODE_CURRENT_VERSION} (${NODE_PATH})${NC}"
 
-# 检查 npm
-if ! command -v npm &> /dev/null; then
+# 检查 npm - 尝试多个常见路径
+NPM_PATH=""
+if command -v npm &> /dev/null; then
+    NPM_PATH=$(command -v npm)
+elif [ -f "/usr/bin/npm" ]; then
+    NPM_PATH="/usr/bin/npm"
+elif [ -f "/usr/local/bin/npm" ]; then
+    NPM_PATH="/usr/local/bin/npm"
+fi
+
+if [ -z "$NPM_PATH" ]; then
     echo -e "${RED}❌ 未检测到 npm,请先安装 npm${NC}"
     exit 1
 fi
-echo -e "${GREEN}✅ npm 已安装: $(npm -v)${NC}"
+
+NPM_CURRENT_VERSION=$($NPM_PATH -v)
+echo -e "${GREEN}✅ npm 已安装: ${NPM_CURRENT_VERSION} (${NPM_PATH})${NC}"
 
 # 安装 PM2
-if ! command -v pm2 &> /dev/null; then
-    echo -e "${YELLOW}安装 PM2...${NC}"
-    npm install -g pm2
+PM2_PATH=""
+if command -v pm2 &> /dev/null; then
+    PM2_PATH=$(command -v pm2)
+elif [ -f "/usr/bin/pm2" ]; then
+    PM2_PATH="/usr/bin/pm2"
+elif [ -f "/usr/local/bin/pm2" ]; then
+    PM2_PATH="/usr/local/bin/pm2"
 fi
-echo -e "${GREEN}✅ PM2 已安装: $(pm2 -v)${NC}"
+
+if [ -z "$PM2_PATH" ]; then
+    echo -e "${YELLOW}安装 PM2...${NC}"
+    $NPM_PATH install -g pm2
+    # 重新检测 PM2 路径
+    if command -v pm2 &> /dev/null; then
+        PM2_PATH=$(command -v pm2)
+    elif [ -f "/usr/bin/pm2" ]; then
+        PM2_PATH="/usr/bin/pm2"
+    elif [ -f "/usr/local/bin/pm2" ]; then
+        PM2_PATH="/usr/local/bin/pm2"
+    fi
+fi
+
+if [ -n "$PM2_PATH" ]; then
+    PM2_CURRENT_VERSION=$($PM2_PATH -v)
+    echo -e "${GREEN}✅ PM2 已安装: ${PM2_CURRENT_VERSION} (${PM2_PATH})${NC}"
+else
+    echo -e "${YELLOW}⚠️  PM2 安装可能失败,将在后续步骤中验证${NC}"
+fi
 
 echo ""
 echo -e "${GREEN}==> 步骤 2: 克隆/更新代码${NC}"
@@ -138,7 +185,13 @@ echo -e "${GREEN}==> 步骤 4: 安装依赖${NC}"
 echo ""
 
 cd $PROJECT_DIR
-npm install --production
+
+# 使用检测到的 npm 路径
+if [ -n "$NPM_PATH" ]; then
+    $NPM_PATH install --production
+else
+    npm install --production
+fi
 
 echo -e "${GREEN}✅ 依赖安装完成${NC}"
 
@@ -146,16 +199,27 @@ echo ""
 echo -e "${GREEN}==> 步骤 5: 配置 PM2${NC}"
 echo ""
 
+cd $PROJECT_DIR
+
+# 确定 PM2 命令
+if [ -n "$PM2_PATH" ]; then
+    PM2_CMD="$PM2_PATH"
+elif command -v pm2 &> /dev/null; then
+    PM2_CMD="pm2"
+else
+    echo -e "${RED}❌ PM2 未找到,无法启动服务${NC}"
+    exit 1
+fi
+
 # 停止旧进程
-pm2 delete $PROJECT_NAME 2>/dev/null || true
+$PM2_CMD delete $PROJECT_NAME 2>/dev/null || true
 
 # 启动新进程
-cd $PROJECT_DIR
-pm2 start ecosystem.config.js
+$PM2_CMD start ecosystem.config.js
 
 # 设置开机自启
-pm2 startup systemd -u $ORIGINAL_USER --hp $ORIGINAL_HOME | grep -v "^PM2" | bash || true
-pm2 save
+$PM2_CMD startup systemd -u $ORIGINAL_USER --hp $ORIGINAL_HOME | grep -v "^PM2" | bash || true
+$PM2_CMD save
 
 echo -e "${GREEN}✅ PM2 配置完成${NC}"
 
