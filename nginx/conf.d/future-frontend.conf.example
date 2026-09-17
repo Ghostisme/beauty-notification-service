@@ -1,0 +1,128 @@
+# ========================================
+# 前后端分离架构 - 前端配置示例
+# ========================================
+# 使用场景:
+# 当你有独立的前端项目(React/Vue/etc)时,重命名此文件去掉 .example 后缀并修改配置
+#
+# 架构:
+# - 前端: /var/www/beauty-frontend (静态文件)
+# - 后端 API: 继续使用 backend upstream
+# - 管理后台: /var/www/beauty-admin (独立前端项目)
+# ========================================
+
+# 主前端应用
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name app.your-domain.com;
+
+    # SSL 证书 (与主域名相同或独立证书)
+    ssl_certificate /etc/nginx/ssl/your-domain.com.crt;
+    ssl_certificate_key /etc/nginx/ssl/your-domain.com.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256';
+    ssl_prefer_server_ciphers off;
+
+    # 安全头
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # 前端静态文件根目录
+    root /var/www/beauty-frontend/dist;
+    index index.html;
+
+    # 日志
+    access_log /var/log/nginx/frontend.access.log main;
+    error_log /var/log/nginx/frontend.error.log warn;
+
+    # API 代理到后端 - 解决跨域问题
+    location /api/ {
+        limit_req zone=api_limit burst=20 nodelay;
+
+        proxy_pass http://backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # CORS 头(如果后端没处理)
+        add_header Access-Control-Allow-Origin "https://app.your-domain.com" always;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+
+    # 静态资源 - 强缓存
+    location ~* \.(jpg|jpeg|png|gif|ico|svg|webp)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location ~* \.(css|js)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # 字体文件
+    location ~* \.(woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header Access-Control-Allow-Origin "*";
+    }
+
+    # SPA 路由 - 所有请求返回 index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache";
+    }
+}
+
+# 管理后台前端应用
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name admin.your-domain.com;
+
+    ssl_certificate /etc/nginx/ssl/your-domain.com.crt;
+    ssl_certificate_key /etc/nginx/ssl/your-domain.com.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256';
+    ssl_prefer_server_ciphers off;
+
+    # 管理后台静态文件
+    root /var/www/beauty-admin/dist;
+    index index.html;
+
+    access_log /var/log/nginx/admin-frontend.access.log main;
+    error_log /var/log/nginx/admin-frontend.error.log warn;
+
+    # IP 白名单(推荐)
+    # allow 192.168.1.0/24;
+    # allow 123.456.789.0/24;
+    # deny all;
+
+    # 管理 API 代理
+    location /admin/ {
+        proxy_pass http://backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 静态资源缓存
+    location ~* \.(jpg|jpeg|png|gif|ico|svg|css|js|woff|woff2)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # SPA 路由
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache";
+    }
+}

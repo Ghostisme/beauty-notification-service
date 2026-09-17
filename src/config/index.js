@@ -30,6 +30,12 @@ module.exports = {
     database: process.env.DB_NAME,
   },
 
+  // 存储配置
+  storage: {
+    type: process.env.STORAGE_TYPE || 'json', // mysql | json | txt
+    dataDir: process.env.STORAGE_DATA_DIR || './data',
+  },
+
   // 服务器配置
   server: {
     port: process.env.PORT || 3000,

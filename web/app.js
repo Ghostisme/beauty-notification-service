@@ -1,9 +1,13 @@
 /**
  * 美容店来客通知管理后台 - 前端逻辑
+ * 使用 Bootstrap 5
  */
 
 // API 基础地址
 const API_BASE = window.location.origin;
+
+// Bootstrap Modal 实例
+let authModalInstance = null;
 
 // 全局状态
 const state = {
@@ -17,8 +21,8 @@ const state = {
  * 页面初始化
  */
 document.addEventListener('DOMContentLoaded', () => {
-  // 初始化页面导航
-  initNavigation();
+  // 初始化 Bootstrap 组件
+  initBootstrapComponents();
 
   // 检查服务状态
   checkServerStatus();
@@ -34,31 +38,38 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * 初始化页面导航
+ * 初始化 Bootstrap 组件
  */
-function initNavigation() {
-  const menuItems = document.querySelectorAll('.menu-item');
+function initBootstrapComponents() {
+  // 初始化模态框
+  const authModalEl = document.getElementById('authModal');
+  if (authModalEl) {
+    authModalInstance = new bootstrap.Modal(authModalEl);
+  }
+}
 
-  menuItems.forEach(item => {
-    item.addEventListener('click', () => {
-      const page = item.dataset.page;
+/**
+ * 页面切换
+ */
+function switchPage(event, page) {
+  event.preventDefault();
 
-      // 更新菜单激活状态
-      menuItems.forEach(i => i.classList.remove('active'));
-      item.classList.add('active');
-
-      // 切换页面内容
-      document.querySelectorAll('.page-content').forEach(p => {
-        p.classList.remove('active');
-      });
-      document.getElementById(page).classList.add('active');
-
-      state.currentPage = page;
-
-      // 加载对应页面数据
-      loadPageData(page);
-    });
+  // 更新侧边栏激活状态
+  document.querySelectorAll('.sidebar .nav-link').forEach(link => {
+    link.classList.remove('active');
   });
+  event.currentTarget.classList.add('active');
+
+  // 切换页面内容
+  document.querySelectorAll('.page-content').forEach(content => {
+    content.style.display = 'none';
+  });
+  document.getElementById(page).style.display = 'block';
+
+  state.currentPage = page;
+
+  // 加载对应页面数据
+  loadPageData(page);
 }
 
 /**
@@ -88,21 +99,25 @@ function loadPageData(page) {
  * 检查服务器状态
  */
 async function checkServerStatus() {
+  const statusBadge = document.getElementById('statusBadge');
+  const statusIcon = document.getElementById('statusIcon');
+  const statusText = document.getElementById('statusText');
+
   try {
     const response = await fetch(`${API_BASE}/api/health`);
     const data = await response.json();
 
     if (data.status === 'ok') {
-      document.getElementById('statusDot').classList.add('online');
-      document.getElementById('statusDot').classList.remove('offline');
-      document.getElementById('statusText').textContent = '运行中';
+      statusBadge.className = 'badge bg-success rounded-pill';
+      statusIcon.className = 'bi bi-circle-fill me-1';
+      statusText.textContent = '运行中';
     } else {
       throw new Error('服务异常');
     }
   } catch (error) {
-    document.getElementById('statusDot').classList.add('offline');
-    document.getElementById('statusDot').classList.remove('online');
-    document.getElementById('statusText').textContent = '离线';
+    statusBadge.className = 'badge bg-danger rounded-pill';
+    statusIcon.className = 'bi bi-circle-fill me-1';
+    statusText.textContent = '离线';
   }
 }
 
@@ -112,37 +127,39 @@ async function checkServerStatus() {
 async function loadDashboard() {
   try {
     // 加载统计数据
-    const statsRes = await fetch(`${API_BASE}/api/admin/statistics`);
-    const statsData = await statsRes.json();
-
-    if (statsData.code === 0) {
-      state.stats = statsData.data;
-      updateStatsCards(statsData.data);
+    const statsRes = await fetch(`${API_BASE}/admin/shops`);
+    if (statsRes.ok) {
+      const statsData = await statsRes.json();
+      if (statsData.code === 0) {
+        updateStatsCards(statsData.data);
+      }
     }
 
     // 加载最近消息
-    const logsRes = await fetch(`${API_BASE}/api/admin/logs?limit=10`);
-    const logsData = await logsRes.json();
-
-    if (logsData.code === 0) {
-      renderRecentMessages(logsData.data);
+    const logsRes = await fetch(`${API_BASE}/admin/logs?limit=10`);
+    if (logsRes.ok) {
+      const logsData = await logsRes.json();
+      if (logsData.code === 0) {
+        renderRecentMessages(logsData.data);
+      }
     }
 
   } catch (error) {
     console.error('加载概览数据失败:', error);
-    showError('加载概览数据失败');
+    showToast('加载概览数据失败', 'danger');
   }
 }
 
 /**
  * 更新统计卡片
  */
-function updateStatsCards(stats) {
-  document.getElementById('totalShops').textContent = stats.total_shops || 0;
-  document.getElementById('todayMessages').textContent = stats.today_messages || 0;
-  document.getElementById('successRate').textContent =
-    stats.success_rate ? `${stats.success_rate}%` : '-';
-  document.getElementById('totalCustomers').textContent = stats.total_customers || 0;
+function updateStatsCards(shops) {
+  document.getElementById('totalShops').textContent = shops?.length || 0;
+
+  // 简化统计 - 实际数据需要后端 API 支持
+  document.getElementById('todayMessages').textContent = '-';
+  document.getElementById('successRate').textContent = '-';
+  document.getElementById('totalCustomers').textContent = '-';
 }
 
 /**
@@ -152,22 +169,27 @@ function renderRecentMessages(messages) {
   const container = document.getElementById('recentMessages');
 
   if (!messages || messages.length === 0) {
-    container.innerHTML = '<div class="loading">暂无消息记录</div>';
+    container.innerHTML = `
+      <div class="text-center py-4 text-muted">
+        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+        <p>暂无消息记录</p>
+      </div>
+    `;
     return;
   }
 
   container.innerHTML = messages.map(msg => `
-    <div class="message-item ${msg.push_success ? 'success' : 'failed'}">
-      <div class="message-header">
+    <div class="message-item">
+      <div class="d-flex justify-content-between align-items-start mb-2">
         <div>
-          <span class="message-shop">${msg.shop_name || '未知店铺'}</span>
-          <span class="badge ${msg.push_success ? 'badge-success' : 'badge-danger'}">
+          <span class="fw-bold">${msg.shop_name || '未知店铺'}</span>
+          <span class="badge bg-${msg.push_success ? 'success' : 'danger'} ms-2">
             ${msg.push_success ? '成功' : '失败'}
           </span>
         </div>
         <span class="message-time">${formatTime(msg.created_at)}</span>
       </div>
-      <div class="message-body">
+      <div class="text-muted">
         <strong>${msg.customer_nickname || '顾客'}</strong>: ${msg.message_content || '无消息内容'}
       </div>
     </div>
@@ -178,6 +200,7 @@ function renderRecentMessages(messages) {
  * 刷新概览页面
  */
 function refreshDashboard() {
+  showToast('正在刷新...', 'info');
   loadDashboard();
 }
 
@@ -186,24 +209,34 @@ function refreshDashboard() {
  */
 async function loadShops() {
   const container = document.getElementById('shopsList');
-  container.innerHTML = '<div class="loading">加载中...</div>';
+  container.innerHTML = `
+    <div class="text-center py-5">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">加载中...</span>
+      </div>
+      <p class="mt-2 text-muted">加载中...</p>
+    </div>
+  `;
 
   try {
-    const response = await fetch(`${API_BASE}/api/admin/shops`);
+    const response = await fetch(`${API_BASE}/admin/shops`);
     const data = await response.json();
 
     if (data.code === 0) {
       state.shops = data.data;
       renderShopsList(data.data);
-
-      // 同时更新测试表单和日志过滤器的店铺列表
       updateShopSelects(data.data);
     } else {
       throw new Error(data.error || '加载失败');
     }
   } catch (error) {
     console.error('加载店铺列表失败:', error);
-    container.innerHTML = `<div class="loading">加载失败: ${error.message}</div>`;
+    container.innerHTML = `
+      <div class="alert alert-danger" role="alert">
+        <i class="bi bi-exclamation-triangle me-2"></i>
+        加载失败: ${error.message}
+      </div>
+    `;
   }
 }
 
@@ -215,10 +248,11 @@ function renderShopsList(shops) {
 
   if (!shops || shops.length === 0) {
     container.innerHTML = `
-      <div class="loading">
-        暂无店铺<br>
-        <button class="btn btn-primary" onclick="showAuthModal()" style="margin-top: 1rem;">
-          授权第一个店铺
+      <div class="text-center py-5">
+        <i class="bi bi-shop fs-1 text-muted d-block mb-3"></i>
+        <p class="text-muted mb-3">暂无店铺</p>
+        <button class="btn btn-primary" onclick="showAuthModal()">
+          <i class="bi bi-plus-circle me-1"></i> 授权第一个店铺
         </button>
       </div>
     `;
@@ -226,42 +260,44 @@ function renderShopsList(shops) {
   }
 
   container.innerHTML = `
-    <table>
-      <thead>
-        <tr>
-          <th>店铺名称</th>
-          <th>店铺ID</th>
-          <th>企微群</th>
-          <th>Token 状态</th>
-          <th>最后更新</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${shops.map(shop => `
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead>
           <tr>
-            <td><strong>${shop.shop_name}</strong></td>
-            <td><code>${shop.shop_id}</code></td>
-            <td>
-              ${shop.wework_chat_name
-                ? `<span class="badge badge-success">${shop.wework_chat_name}</span>`
-                : '<span class="badge badge-warning">未配置</span>'}
-            </td>
-            <td>
-              ${isTokenValid(shop.token_expires_at)
-                ? '<span class="badge badge-success">有效</span>'
-                : '<span class="badge badge-danger">已过期</span>'}
-            </td>
-            <td>${formatTime(shop.updated_at)}</td>
-            <td>
-              <button class="btn btn-sm" onclick="configWeworkChat('${shop.shop_id}')">
-                配置企微群
-              </button>
-            </td>
+            <th>店铺名称</th>
+            <th>店铺ID</th>
+            <th>企微群</th>
+            <th>Token 状态</th>
+            <th>最后更新</th>
+            <th>操作</th>
           </tr>
-        `).join('')}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          ${shops.map(shop => `
+            <tr>
+              <td><strong>${shop.shop_name}</strong></td>
+              <td><code class="text-muted">${shop.shop_id}</code></td>
+              <td>
+                ${shop.wework_chat_name
+                  ? `<span class="badge bg-success">${shop.wework_chat_name}</span>`
+                  : '<span class="badge bg-warning text-dark">未配置</span>'}
+              </td>
+              <td>
+                ${isTokenValid(shop.token_expires_at)
+                  ? '<span class="badge bg-success">有效</span>'
+                  : '<span class="badge bg-danger">已过期</span>'}
+              </td>
+              <td>${formatTime(shop.updated_at)}</td>
+              <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="configWeworkChat('${shop.shop_id}')">
+                  <i class="bi bi-gear me-1"></i> 配置企微群
+                </button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -277,14 +313,12 @@ function updateShopSelects(shops) {
   selects.forEach(select => {
     if (!select) return;
 
-    // 保留第一个选项(提示文本)
     const firstOption = select.options[0];
     select.innerHTML = '';
     if (firstOption) {
       select.appendChild(firstOption);
     }
 
-    // 添加店铺选项
     shops.forEach(shop => {
       const option = document.createElement('option');
       option.value = shop.shop_id;
@@ -298,18 +332,13 @@ function updateShopSelects(shops) {
  * 显示授权弹窗
  */
 function showAuthModal() {
-  const modal = document.getElementById('authModal');
   const authUrl = `https://open.douyin.com/platform/oauth/connect/?client_key=YOUR_CLIENT_KEY&response_type=code&scope=life.order&redirect_uri=${encodeURIComponent(window.location.origin + '/api/douyin/callback')}`;
 
   document.getElementById('authUrl').value = authUrl;
-  modal.classList.add('active');
-}
 
-/**
- * 关闭授权弹窗
- */
-function closeAuthModal() {
-  document.getElementById('authModal').classList.remove('active');
+  if (authModalInstance) {
+    authModalInstance.show();
+  }
 }
 
 /**
@@ -322,7 +351,7 @@ async function configWeworkChat(shopId) {
   const chatName = prompt('请输入企微群名称(可选):') || '';
 
   try {
-    const response = await fetch(`${API_BASE}/api/admin/shops/${shopId}/wework-chat`, {
+    const response = await fetch(`${API_BASE}/admin/shops/${shopId}/wework-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chatId, chatName })
@@ -331,13 +360,13 @@ async function configWeworkChat(shopId) {
     const data = await response.json();
 
     if (data.code === 0) {
-      alert('配置成功!');
+      showToast('配置成功!', 'success');
       loadShops();
     } else {
       throw new Error(data.error || '配置失败');
     }
   } catch (error) {
-    alert(`配置失败: ${error.message}`);
+    showToast(`配置失败: ${error.message}`, 'danger');
   }
 }
 
@@ -348,10 +377,16 @@ async function loadLogs() {
   const container = document.getElementById('logsList');
   const shopFilter = document.getElementById('logShopFilter').value;
 
-  container.innerHTML = '<div class="loading">加载中...</div>';
+  container.innerHTML = `
+    <div class="text-center py-5">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">加载中...</span>
+      </div>
+    </div>
+  `;
 
   try {
-    let url = `${API_BASE}/api/admin/logs?limit=100`;
+    let url = `${API_BASE}/admin/logs?limit=100`;
     if (shopFilter) {
       url += `&shopId=${shopFilter}`;
     }
@@ -367,7 +402,11 @@ async function loadLogs() {
     }
   } catch (error) {
     console.error('加载日志失败:', error);
-    container.innerHTML = `<div class="loading">加载失败: ${error.message}</div>`;
+    container.innerHTML = `
+      <div class="alert alert-danger" role="alert">
+        加载失败: ${error.message}
+      </div>
+    `;
   }
 }
 
@@ -378,40 +417,47 @@ function renderLogsList(logs) {
   const container = document.getElementById('logsList');
 
   if (!logs || logs.length === 0) {
-    container.innerHTML = '<div class="loading">暂无日志记录</div>';
+    container.innerHTML = `
+      <div class="text-center py-4 text-muted">
+        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+        <p>暂无日志记录</p>
+      </div>
+    `;
     return;
   }
 
   container.innerHTML = `
-    <table>
-      <thead>
-        <tr>
-          <th>时间</th>
-          <th>店铺</th>
-          <th>顾客</th>
-          <th>消息内容</th>
-          <th>状态</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${logs.map(log => `
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead>
           <tr>
-            <td style="white-space: nowrap;">${formatTime(log.created_at)}</td>
-            <td>${log.shop_name || '未知'}</td>
-            <td>${log.customer_nickname || '-'}</td>
-            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">
-              ${log.message_content || '-'}
-            </td>
-            <td>
-              <span class="badge ${log.push_success ? 'badge-success' : 'badge-danger'}">
-                ${log.push_success ? '成功' : '失败'}
-              </span>
-              ${log.error_message ? `<br><small style="color: var(--danger-color);">${log.error_message}</small>` : ''}
-            </td>
+            <th style="width: 150px;">时间</th>
+            <th>店铺</th>
+            <th>顾客</th>
+            <th>消息内容</th>
+            <th style="width: 100px;">状态</th>
           </tr>
-        `).join('')}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          ${logs.map(log => `
+            <tr class="log-item log-${log.push_success ? 'success' : 'error'}">
+              <td class="text-nowrap">${formatTime(log.created_at)}</td>
+              <td>${log.shop_name || '未知'}</td>
+              <td>${log.customer_nickname || '-'}</td>
+              <td class="text-truncate" style="max-width: 300px;">
+                ${log.message_content || '-'}
+              </td>
+              <td>
+                <span class="badge bg-${log.push_success ? 'success' : 'danger'}">
+                  ${log.push_success ? '成功' : '失败'}
+                </span>
+                ${log.error_message ? `<br><small class="text-danger">${log.error_message}</small>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -419,7 +465,6 @@ function renderLogsList(logs) {
  * 加载系统配置
  */
 function loadConfig() {
-  // 显示环境变量(敏感信息脱敏)
   const envVars = [
     { key: 'DOUYIN_CLIENT_KEY', value: '已配置', masked: true },
     { key: 'DOUYIN_CLIENT_SECRET', value: '已配置', masked: true },
@@ -451,7 +496,6 @@ function setupWebhookUrls() {
  * 加载 Webhook 测试页面
  */
 function loadWebhookTest() {
-  // 店铺列表已在 loadShops 中更新
   if (state.shops.length === 0) {
     loadShops();
   }
@@ -468,16 +512,25 @@ async function sendTestMessage(event) {
   const resultDiv = document.getElementById('testResult');
 
   if (!shopId) {
-    showTestResult('error', '请选择店铺');
+    resultDiv.innerHTML = `
+      <div class="alert alert-warning alert-dismissible fade show" role="alert">
+        <i class="bi bi-exclamation-triangle me-2"></i>
+        请选择店铺
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    `;
     return;
   }
 
-  resultDiv.className = 'test-result';
-  resultDiv.textContent = '发送中...';
-  resultDiv.classList.add('show');
+  resultDiv.innerHTML = `
+    <div class="alert alert-info" role="alert">
+      <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+      发送中...
+    </div>
+  `;
 
   try {
-    const response = await fetch(`${API_BASE}/api/test/push`, {
+    const response = await fetch(`${API_BASE}/test/push`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shopId, testMessage })
@@ -486,22 +539,25 @@ async function sendTestMessage(event) {
     const data = await response.json();
 
     if (data.code === 0) {
-      showTestResult('success', '✅ 测试消息发送成功!');
+      resultDiv.innerHTML = `
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+          <i class="bi bi-check-circle me-2"></i>
+          测试消息发送成功!
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      `;
     } else {
       throw new Error(data.error || '发送失败');
     }
   } catch (error) {
-    showTestResult('error', `❌ 发送失败: ${error.message}`);
+    resultDiv.innerHTML = `
+      <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <i class="bi bi-x-circle me-2"></i>
+        发送失败: ${error.message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    `;
   }
-}
-
-/**
- * 显示测试结果
- */
-function showTestResult(type, message) {
-  const resultDiv = document.getElementById('testResult');
-  resultDiv.className = `test-result ${type} show`;
-  resultDiv.textContent = message;
 }
 
 /**
@@ -514,10 +570,18 @@ function copyToClipboard(elementId) {
 
   try {
     document.execCommand('copy');
-    alert('已复制到剪贴板');
+    showToast('已复制到剪贴板', 'success');
   } catch (err) {
-    alert('复制失败,请手动复制');
+    showToast('复制失败,请手动复制', 'danger');
   }
+}
+
+/**
+ * 显示 Toast 提示
+ */
+function showToast(message, type = 'info') {
+  // 简单的提示实现,可以使用 Bootstrap Toast 组件替代
+  console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
 /**
@@ -530,29 +594,24 @@ function formatTime(timestamp) {
   const now = new Date();
   const diff = now - date;
 
-  // 1分钟内
   if (diff < 60000) {
     return '刚刚';
   }
 
-  // 1小时内
   if (diff < 3600000) {
     return `${Math.floor(diff / 60000)} 分钟前`;
   }
 
-  // 今天
   if (date.toDateString() === now.toDateString()) {
     return `今天 ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
   }
 
-  // 昨天
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   if (date.toDateString() === yesterday.toDateString()) {
     return `昨天 ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
   }
 
-  // 其他
   return date.toLocaleString('zh-CN', {
     month: '2-digit',
     day: '2-digit',
@@ -567,12 +626,4 @@ function formatTime(timestamp) {
 function isTokenValid(expiresAt) {
   if (!expiresAt) return false;
   return new Date(expiresAt) > new Date();
-}
-
-/**
- * 显示错误提示
- */
-function showError(message) {
-  console.error(message);
-  // 可以实现一个 Toast 提示组件
 }

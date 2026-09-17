@@ -4,235 +4,411 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>美容店来客通知管理后台</title>
+
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+  <!-- 自定义样式 -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- 顶部导航栏 -->
-  <nav class="navbar">
-    <div class="nav-container">
-      <div class="nav-brand">
-        <span class="brand-icon">🔔</span>
-        <span class="brand-text">美容店来客通知系统</span>
-      </div>
-      <div class="nav-status">
-        <span class="status-dot" id="statusDot"></span>
-        <span id="statusText">检查中...</span>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-gradient sticky-top shadow">
+    <div class="container-fluid">
+      <a class="navbar-brand d-flex align-items-center" href="#">
+        <i class="bi bi-bell-fill me-2 fs-4"></i>
+        <span class="fw-bold">美容店来客通知系统</span>
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+        <ul class="navbar-nav align-items-center">
+          <li class="nav-item me-3">
+            <span class="badge rounded-pill" id="statusBadge">
+              <i class="bi bi-circle-fill me-1" id="statusIcon"></i>
+              <span id="statusText">检查中...</span>
+            </span>
+          </li>
+          <li class="nav-item">
+            <button class="btn btn-sm btn-outline-light" onclick="refreshDashboard()">
+              <i class="bi bi-arrow-clockwise"></i> 刷新
+            </button>
+          </li>
+        </ul>
       </div>
     </div>
   </nav>
 
-  <!-- 主容器 -->
-  <div class="container">
-    <!-- 侧边栏 -->
-    <aside class="sidebar">
-      <ul class="menu">
-        <li class="menu-item active" data-page="dashboard">
-          <span class="menu-icon">📊</span>
-          <span class="menu-text">概览</span>
-        </li>
-        <li class="menu-item" data-page="shops">
-          <span class="menu-icon">🏪</span>
-          <span class="menu-text">店铺管理</span>
-        </li>
-        <li class="menu-item" data-page="logs">
-          <span class="menu-icon">📝</span>
-          <span class="menu-text">消息日志</span>
-        </li>
-        <li class="menu-item" data-page="config">
-          <span class="menu-icon">⚙️</span>
-          <span class="menu-text">系统配置</span>
-        </li>
-        <li class="menu-item" data-page="webhook">
-          <span class="menu-icon">🔗</span>
-          <span class="menu-text">Webhook 测试</span>
-        </li>
-      </ul>
-    </aside>
+  <div class="container-fluid">
+    <div class="row">
+      <!-- 侧边栏 -->
+      <nav class="col-md-3 col-lg-2 d-md-block sidebar bg-light">
+        <div class="position-sticky pt-3">
+          <ul class="nav flex-column">
+            <li class="nav-item">
+              <a class="nav-link active" href="#" data-page="dashboard" onclick="switchPage(event, 'dashboard')">
+                <i class="bi bi-speedometer2 me-2"></i>
+                概览
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" data-page="shops" onclick="switchPage(event, 'shops')">
+                <i class="bi bi-shop me-2"></i>
+                店铺管理
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" data-page="logs" onclick="switchPage(event, 'logs')">
+                <i class="bi bi-journal-text me-2"></i>
+                消息日志
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" data-page="config" onclick="switchPage(event, 'config')">
+                <i class="bi bi-gear me-2"></i>
+                系统配置
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" data-page="webhook" onclick="switchPage(event, 'webhook')">
+                <i class="bi bi-link-45deg me-2"></i>
+                Webhook 测试
+              </a>
+            </li>
+          </ul>
 
-    <!-- 主内容区 -->
-    <main class="main-content">
-      <!-- 概览页面 -->
-      <div id="dashboard" class="page-content active">
-        <h1 class="page-title">系统概览</h1>
+          <hr class="my-3">
 
-        <!-- 统计卡片 -->
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-icon">🏪</div>
-            <div class="stat-content">
-              <div class="stat-value" id="totalShops">-</div>
-              <div class="stat-label">已授权店铺</div>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-icon">💬</div>
-            <div class="stat-content">
-              <div class="stat-value" id="todayMessages">-</div>
-              <div class="stat-label">今日消息</div>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-icon">✅</div>
-            <div class="stat-content">
-              <div class="stat-value" id="successRate">-</div>
-              <div class="stat-label">推送成功率</div>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-icon">👥</div>
-            <div class="stat-content">
-              <div class="stat-value" id="totalCustomers">-</div>
-              <div class="stat-label">累计客户</div>
-            </div>
+          <div class="px-3">
+            <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+              <span>快速链接</span>
+            </h6>
+            <ul class="nav flex-column mb-2">
+              <li class="nav-item">
+                <a class="nav-link text-muted" href="/api/health" target="_blank">
+                  <i class="bi bi-heart-pulse me-2"></i>
+                  健康检查
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link text-muted" href="/" target="_blank">
+                  <i class="bi bi-house me-2"></i>
+                  首页
+                </a>
+              </li>
+            </ul>
           </div>
         </div>
+      </nav>
 
-        <!-- 最近消息 -->
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">最近消息</h2>
-            <button class="btn btn-sm" onclick="refreshDashboard()">刷新</button>
-          </div>
-          <div class="card-body">
-            <div id="recentMessages" class="message-list">
-              <div class="loading">加载中...</div>
+      <!-- 主内容区 -->
+      <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+        <!-- 概览页面 -->
+        <div id="dashboard" class="page-content">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <h1 class="h2"><i class="bi bi-speedometer2 me-2"></i>系统概览</h1>
+            <div class="btn-toolbar mb-2 mb-md-0">
+              <button class="btn btn-sm btn-outline-secondary" onclick="refreshDashboard()">
+                <i class="bi bi-arrow-clockwise"></i> 刷新数据
+              </button>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- 店铺管理页面 -->
-      <div id="shops" class="page-content">
-        <h1 class="page-title">店铺管理</h1>
-
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">店铺列表</h2>
-            <button class="btn btn-primary" onclick="showAuthModal()">授权新店铺</button>
-          </div>
-          <div class="card-body">
-            <div id="shopsList" class="table-container">
-              <div class="loading">加载中...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 消息日志页面 -->
-      <div id="logs" class="page-content">
-        <h1 class="page-title">消息日志</h1>
-
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">历史记录</h2>
-            <div class="filter-group">
-              <select id="logShopFilter" class="form-select" onchange="loadLogs()">
-                <option value="">全部店铺</option>
-              </select>
-              <button class="btn btn-sm" onclick="loadLogs()">刷新</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="logsList" class="table-container">
-              <div class="loading">加载中...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 系统配置页面 -->
-      <div id="config" class="page-content">
-        <h1 class="page-title">系统配置</h1>
-
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">环境变量</h2>
-          </div>
-          <div class="card-body">
-            <div id="envVars" class="env-list">
-              <div class="loading">加载中...</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">Webhook 配置</h2>
-          </div>
-          <div class="card-body">
-            <div class="webhook-info">
-              <div class="info-item">
-                <label>抖音 Webhook 地址:</label>
-                <div class="input-group">
-                  <input type="text" id="webhookUrl" class="form-input" readonly>
-                  <button class="btn btn-sm" onclick="copyToClipboard('webhookUrl')">复制</button>
+          <!-- 统计卡片 -->
+          <div class="row g-3 mb-4">
+            <div class="col-xl-3 col-md-6">
+              <div class="card stats-card border-0 shadow-sm">
+                <div class="card-body">
+                  <div class="d-flex align-items-center">
+                    <div class="flex-shrink-0">
+                      <div class="stats-icon bg-primary bg-gradient">
+                        <i class="bi bi-shop"></i>
+                      </div>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                      <h6 class="text-muted mb-1">已授权店铺</h6>
+                      <h3 class="mb-0" id="totalShops">-</h3>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div class="info-item">
-                <label>授权回调地址:</label>
-                <div class="input-group">
-                  <input type="text" id="callbackUrl" class="form-input" readonly>
-                  <button class="btn btn-sm" onclick="copyToClipboard('callbackUrl')">复制</button>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+              <div class="card stats-card border-0 shadow-sm">
+                <div class="card-body">
+                  <div class="d-flex align-items-center">
+                    <div class="flex-shrink-0">
+                      <div class="stats-icon bg-success bg-gradient">
+                        <i class="bi bi-chat-dots"></i>
+                      </div>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                      <h6 class="text-muted mb-1">今日消息</h6>
+                      <h3 class="mb-0" id="todayMessages">-</h3>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+              <div class="card stats-card border-0 shadow-sm">
+                <div class="card-body">
+                  <div class="d-flex align-items-center">
+                    <div class="flex-shrink-0">
+                      <div class="stats-icon bg-info bg-gradient">
+                        <i class="bi bi-check-circle"></i>
+                      </div>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                      <h6 class="text-muted mb-1">推送成功率</h6>
+                      <h3 class="mb-0" id="successRate">-</h3>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+              <div class="card stats-card border-0 shadow-sm">
+                <div class="card-body">
+                  <div class="d-flex align-items-center">
+                    <div class="flex-shrink-0">
+                      <div class="stats-icon bg-warning bg-gradient">
+                        <i class="bi bi-people"></i>
+                      </div>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                      <h6 class="text-muted mb-1">累计客户</h6>
+                      <h3 class="mb-0" id="totalCustomers">-</h3>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- Webhook 测试页面 -->
-      <div id="webhook" class="page-content">
-        <h1 class="page-title">Webhook 测试</h1>
-
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">发送测试消息</h2>
+          <!-- 最近消息 -->
+          <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3">
+              <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>最近消息</h5>
+            </div>
+            <div class="card-body">
+              <div id="recentMessages">
+                <div class="text-center py-5">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">加载中...</span>
+                  </div>
+                  <p class="mt-2 text-muted">加载中...</p>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="card-body">
-            <form id="testForm" onsubmit="sendTestMessage(event)">
-              <div class="form-group">
-                <label>选择店铺:</label>
-                <select id="testShopId" class="form-select" required>
-                  <option value="">请选择...</option>
+        </div>
+
+        <!-- 店铺管理页面 -->
+        <div id="shops" class="page-content" style="display: none;">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <h1 class="h2"><i class="bi bi-shop me-2"></i>店铺管理</h1>
+            <div class="btn-toolbar mb-2 mb-md-0">
+              <button class="btn btn-primary" onclick="showAuthModal()">
+                <i class="bi bi-plus-circle me-1"></i> 授权新店铺
+              </button>
+            </div>
+          </div>
+
+          <div class="card border-0 shadow-sm">
+            <div class="card-body">
+              <div id="shopsList">
+                <div class="text-center py-5">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">加载中...</span>
+                  </div>
+                  <p class="mt-2 text-muted">加载中...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 消息日志页面 -->
+        <div id="logs" class="page-content" style="display: none;">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <h1 class="h2"><i class="bi bi-journal-text me-2"></i>消息日志</h1>
+            <div class="btn-toolbar mb-2 mb-md-0">
+              <div class="input-group input-group-sm me-2">
+                <select id="logShopFilter" class="form-select" onchange="loadLogs()">
+                  <option value="">全部店铺</option>
                 </select>
               </div>
+              <button class="btn btn-sm btn-outline-secondary" onclick="loadLogs()">
+                <i class="bi bi-arrow-clockwise"></i> 刷新
+              </button>
+            </div>
+          </div>
 
-              <div class="form-group">
-                <label>测试消息:</label>
-                <textarea id="testMessage" class="form-textarea" rows="4" placeholder="输入测试消息内容..."></textarea>
+          <div class="card border-0 shadow-sm">
+            <div class="card-body">
+              <div id="logsList">
+                <div class="text-center py-5">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">加载中...</span>
+                  </div>
+                  <p class="mt-2 text-muted">加载中...</p>
+                </div>
               </div>
-
-              <button type="submit" class="btn btn-primary">发送测试</button>
-            </form>
-
-            <div id="testResult" class="test-result"></div>
+            </div>
           </div>
         </div>
-      </div>
-    </main>
+
+        <!-- 系统配置页面 -->
+        <div id="config" class="page-content" style="display: none;">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <h1 class="h2"><i class="bi bi-gear me-2"></i>系统配置</h1>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-lg-6">
+              <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3">
+                  <h5 class="mb-0"><i class="bi bi-server me-2"></i>环境变量</h5>
+                </div>
+                <div class="card-body">
+                  <div id="envVars">
+                    <div class="text-center py-3">
+                      <div class="spinner-border text-primary spinner-border-sm" role="status">
+                        <span class="visually-hidden">加载中...</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3">
+                  <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Webhook 配置</h5>
+                </div>
+                <div class="card-body">
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">抖音 Webhook 地址</label>
+                    <div class="input-group">
+                      <input type="text" id="webhookUrl" class="form-control" readonly>
+                      <button class="btn btn-outline-secondary" onclick="copyToClipboard('webhookUrl')">
+                        <i class="bi bi-clipboard"></i>
+                      </button>
+                    </div>
+                    <div class="form-text">POST 请求接收抖音来客消息推送</div>
+                  </div>
+                  <div class="mb-0">
+                    <label class="form-label fw-bold">授权回调地址</label>
+                    <div class="input-group">
+                      <input type="text" id="callbackUrl" class="form-control" readonly>
+                      <button class="btn btn-outline-secondary" onclick="copyToClipboard('callbackUrl')">
+                        <i class="bi bi-clipboard"></i>
+                      </button>
+                    </div>
+                    <div class="form-text">用户授权后的跳转地址</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Webhook 测试页面 -->
+        <div id="webhook" class="page-content" style="display: none;">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <h1 class="h2"><i class="bi bi-link-45deg me-2"></i>Webhook 测试</h1>
+          </div>
+
+          <div class="row">
+            <div class="col-lg-8">
+              <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white py-3">
+                  <h5 class="mb-0"><i class="bi bi-send me-2"></i>发送测试消息</h5>
+                </div>
+                <div class="card-body">
+                  <form id="testForm" onsubmit="sendTestMessage(event)">
+                    <div class="mb-3">
+                      <label class="form-label">选择店铺 <span class="text-danger">*</span></label>
+                      <select id="testShopId" class="form-select" required>
+                        <option value="">请选择店铺...</option>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label class="form-label">测试消息</label>
+                      <textarea id="testMessage" class="form-control" rows="4" placeholder="输入测试消息内容... (可选)"></textarea>
+                      <div class="form-text">留空则发送默认测试消息</div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                      <i class="bi bi-send me-1"></i> 发送测试
+                    </button>
+                  </form>
+
+                  <div id="testResult" class="mt-3"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-4">
+              <div class="card border-0 shadow-sm bg-light">
+                <div class="card-body">
+                  <h6 class="card-title"><i class="bi bi-info-circle me-1"></i>使用说明</h6>
+                  <ul class="small mb-0">
+                    <li>选择已授权的店铺</li>
+                    <li>发送测试消息到企业微信群</li>
+                    <li>验证推送功能是否正常</li>
+                    <li>检查消息格式和内容</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+      </main>
+    </div>
   </div>
 
   <!-- 授权弹窗 -->
-  <div id="authModal" class="modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>授权新店铺</h3>
-        <span class="modal-close" onclick="closeAuthModal()">&times;</span>
-      </div>
-      <div class="modal-body">
-        <p>请复制以下授权链接并在浏览器中打开:</p>
-        <div class="input-group">
-          <input type="text" id="authUrl" class="form-input" readonly>
-          <button class="btn btn-sm" onclick="copyToClipboard('authUrl')">复制</button>
+  <div class="modal fade" id="authModal" tabindex="-1" aria-labelledby="authModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="authModalLabel">
+            <i class="bi bi-key me-2"></i>授权新店铺
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <p class="hint">授权后将自动跳转回系统</p>
+        <div class="modal-body">
+          <div class="alert alert-info" role="alert">
+            <i class="bi bi-info-circle me-2"></i>
+            请复制以下授权链接并在浏览器中打开
+          </div>
+          <div class="input-group mb-3">
+            <input type="text" id="authUrl" class="form-control" readonly>
+            <button class="btn btn-primary" onclick="copyToClipboard('authUrl')">
+              <i class="bi bi-clipboard"></i> 复制
+            </button>
+          </div>
+          <p class="text-muted small mb-0">
+            <i class="bi bi-arrow-return-left me-1"></i>授权后将自动跳转回系统
+          </p>
+        </div>
       </div>
     </div>
   </div>
 
+  <!-- Bootstrap JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- 自定义 JS -->
   <script src="app.js"></script>
 </body>
 </html>
