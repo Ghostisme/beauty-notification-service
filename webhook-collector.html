@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企微群 Webhook 批量收集工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            padding: 30px;
+            background: #f5f5f5;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #07c160;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 14px;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #07c160;
+        }
+        textarea {
+            resize: vertical;
+            font-family: monospace;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+        .btn-primary {
+            background: #07c160;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #06ad56;
+        }
+        .btn-secondary {
+            background: #1989fa;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #1778e0;
+        }
+        .btn-warning {
+            background: #ff976a;
+            color: white;
+        }
+        .btn-warning:hover {
+            background: #ff8350;
+        }
+        .stats {
+            background: #f7f8fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+        }
+        .stat-item {
+            flex: 1;
+        }
+        .stat-number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #07c160;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        #output {
+            background: #f7f8fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .item-list {
+            list-style: none;
+        }
+        .item {
+            background: white;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            border-left: 4px solid #07c160;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .item-info {
+            flex: 1;
+        }
+        .item-id {
+            font-weight: bold;
+            color: #333;
+        }
+        .item-name {
+            color: #666;
+            font-size: 14px;
+        }
+        .item-webhook {
+            color: #999;
+            font-size: 12px;
+            font-family: monospace;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .btn-delete {
+            background: #ee0a24;
+            color: white;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .btn-delete:hover {
+            background: #d00920;
+        }
+        .tips {
+            background: #fff7e6;
+            border-left: 4px solid #ffa940;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .tips h3 {
+            color: #fa8c16;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        .tips ul {
+            margin-left: 20px;
+            color: #666;
+        }
+        .tips li {
+            margin-bottom: 5px;
+        }
+        .success-msg {
+            background: #f0f9ff;
+            border-left: 4px solid #1989fa;
+            padding: 10px 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            color: #1989fa;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 企微群 Webhook 批量收集工具</h1>
+        <p class="subtitle">用于管理 500 个门店的企业微信群机器人配置</p>
+
+        <div class="tips">
+            <h3>💡 使用说明</h3>
+            <ul>
+                <li>每创建一个企微群机器人，就在这里录入一次</li>
+                <li>门店ID建议格式：store_001、store_002...（与抖音门店ID对应）</li>
+                <li>录入完成后点击"导出 JSON"保存为 groups.json</li>
+                <li>支持导入已有配置继续编辑</li>
+            </ul>
+        </div>
+
+        <div class="form-group">
+            <label>门店ID（必填）</label>
+            <input type="text" id="storeId" placeholder="例如: store_001" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label>门店名称（必填）</label>
+            <input type="text" id="storeName" placeholder="例如: 朝阳门店" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label>地区（可选）</label>
+            <input type="text" id="region" placeholder="例如: 北京" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label>Webhook 地址（必填）</label>
+            <textarea id="webhook" rows="3" placeholder="粘贴企微群机器人的 Webhook 地址&#10;格式: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></textarea>
+        </div>
+
+        <div class="button-group">
+            <button class="btn-primary" onclick="addWebhook()">✅ 添加 (Ctrl+Enter)</button>
+            <button class="btn-secondary" onclick="exportJson()">📥 导出 JSON</button>
+            <button class="btn-secondary" onclick="document.getElementById('importFile').click()">📤 导入已有配置</button>
+            <button class="btn-warning" onclick="clearAll()">🗑️ 清空全部</button>
+        </div>
+
+        <input type="file" id="importFile" accept=".json" style="display: none" onchange="importJson(this)">
+
+        <div class="success-msg" id="successMsg"></div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-number" id="count">0</div>
+                <div class="stat-label">已录入门店</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number" id="remaining">500</div>
+                <div class="stat-label">剩余门店</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number" id="progress">0%</div>
+                <div class="stat-label">完成进度</div>
+            </div>
+        </div>
+
+        <h3 style="margin-top: 30px; color: #333;">已录入列表</h3>
+        <div id="output">
+            <p style="color: #999; text-align: center; padding: 20px;">暂无数据，请开始录入...</p>
+        </div>
+    </div>
+
+    <script>
+        let webhooks = {};
+
+        // 加载本地存储
+        if (localStorage.getItem('webhooks')) {
+            try {
+                webhooks = JSON.parse(localStorage.getItem('webhooks'));
+                updateDisplay();
+            } catch (e) {
+                console.error('加载本地存储失败', e);
+            }
+        }
+
+        // 添加 Webhook
+        function addWebhook() {
+            const id = document.getElementById('storeId').value.trim();
+            const name = document.getElementById('storeName').value.trim();
+            const region = document.getElementById('region').value.trim();
+            const webhook = document.getElementById('webhook').value.trim();
+
+            if (!id) {
+                alert('❌ 请填写门店ID');
+                document.getElementById('storeId').focus();
+                return;
+            }
+
+            if (!name) {
+                alert('❌ 请填写门店名称');
+                document.getElementById('storeName').focus();
+                return;
+            }
+
+            if (!webhook) {
+                alert('❌ 请填写 Webhook 地址');
+                document.getElementById('webhook').focus();
+                return;
+            }
+
+            if (!webhook.includes('qyapi.weixin.qq.com/cgi-bin/webhook/send?key=')) {
+                alert('⚠️ Webhook 地址格式不正确\n应该以 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key= 开头');
+                return;
+            }
+
+            if (webhooks[id]) {
+                if (!confirm(`门店 ${id} 已存在，是否覆盖？`)) {
+                    return;
+                }
+            }
+
+            webhooks[id] = { name, webhook };
+            if (region) webhooks[id].region = region;
+
+            showSuccess(`✅ 已添加: ${id} - ${name}`);
+            updateDisplay();
+            saveToLocal();
+            clearForm();
+
+            // 自动聚焦到门店ID，方便连续录入
+            document.getElementById('storeId').focus();
+        }
+
+        // 删除条目
+        function deleteItem(id) {
+            if (confirm(`确认删除 ${id}？`)) {
+                delete webhooks[id];
+                updateDisplay();
+                saveToLocal();
+                showSuccess(`🗑️ 已删除: ${id}`);
+            }
+        }
+
+        // 更新显示
+        function updateDisplay() {
+            const count = Object.keys(webhooks).length;
+            document.getElementById('count').textContent = count;
+            document.getElementById('remaining').textContent = Math.max(0, 500 - count);
+            document.getElementById('progress').textContent = Math.min(100, Math.round(count / 5)) + '%';
+
+            const output = document.getElementById('output');
+
+            if (count === 0) {
+                output.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">暂无数据，请开始录入...</p>';
+                return;
+            }
+
+            let html = '<ul class="item-list">';
+
+            // 按门店ID排序
+            const sortedIds = Object.keys(webhooks).sort();
+
+            sortedIds.forEach(id => {
+                const item = webhooks[id];
+                const webhookShort = item.webhook.substring(0, 60) + '...';
+                html += `
+                    <li class="item">
+                        <div class="item-info">
+                            <div class="item-id">${id}</div>
+                            <div class="item-name">${item.name}${item.region ? ' - ' + item.region : ''}</div>
+                            <div class="item-webhook">${webhookShort}</div>
+                        </div>
+                        <button class="btn-delete" onclick="deleteItem('${id}')">删除</button>
+                    </li>
+                `;
+            });
+
+            html += '</ul>';
+            output.innerHTML = html;
+        }
+
+        // 导出 JSON
+        function exportJson() {
+            if (Object.keys(webhooks).length === 0) {
+                alert('❌ 没有数据可导出');
+                return;
+            }
+
+            const json = JSON.stringify(webhooks, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'groups.json';
+            a.click();
+            URL.revokeObjectURL(url);
+
+            showSuccess(`📥 已导出 ${Object.keys(webhooks).length} 个门店配置`);
+        }
+
+        // 导入 JSON
+        function importJson(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    const count = Object.keys(imported).length;
+
+                    if (confirm(`发现 ${count} 个门店配置，是否导入？\n（会覆盖已有的同名门店）`)) {
+                        webhooks = { ...webhooks, ...imported };
+                        updateDisplay();
+                        saveToLocal();
+                        showSuccess(`📤 成功导入 ${count} 个门店`);
+                    }
+                } catch (e) {
+                    alert('❌ 文件格式错误: ' + e.message);
+                }
+            };
+            reader.readAsText(file);
+            input.value = '';
+        }
+
+        // 清空全部
+        function clearAll() {
+            if (Object.keys(webhooks).length === 0) {
+                alert('已经是空的了');
+                return;
+            }
+
+            if (confirm('⚠️ 确认清空所有数据？此操作不可恢复！')) {
+                webhooks = {};
+                updateDisplay();
+                saveToLocal();
+                showSuccess('🗑️ 已清空所有数据');
+            }
+        }
+
+        // 清空表单
+        function clearForm() {
+            document.getElementById('storeId').value = '';
+            document.getElementById('storeName').value = '';
+            document.getElementById('region').value = '';
+            document.getElementById('webhook').value = '';
+        }
+
+        // 保存到本地存储
+        function saveToLocal() {
+            localStorage.setItem('webhooks', JSON.stringify(webhooks));
+        }
+
+        // 显示成功提示
+        function showSuccess(msg) {
+            const el = document.getElementById('successMsg');
+            el.textContent = msg;
+            el.style.display = 'block';
+            setTimeout(() => {
+                el.style.display = 'none';
+            }, 3000);
+        }
+
+        // 快捷键支持
+        document.getElementById('webhook').addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                addWebhook();
+            }
+        });
+
+        document.getElementById('storeId').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('storeName').focus();
+            }
+        });
+
+        document.getElementById('storeName').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('region').focus();
+            }
+        });
+
+        document.getElementById('region').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('webhook').focus();
+            }
+        });
+    </script>
+</body>
+</html>

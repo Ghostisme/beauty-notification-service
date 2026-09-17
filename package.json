@@ -1,0 +1,27 @@
+{
+  "name": "beauty-notification-service",
+  "version": "1.0.0",
+  "description": "抖音来客消息推送到企业微信外部客户群",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "node src/test.js",
+    "test:webhook": "node test-webhook.js"
+  },
+  "keywords": ["douyin", "wework", "webhook"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.3.1",
+    "body-parser": "^1.20.2",
+    "mysql2": "^3.6.0",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

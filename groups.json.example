@@ -1,0 +1,18 @@
+{
+  "groups": [
+    {
+      "id": "group_0000000001",
+      "name": "朝阳店客户群",
+      "chatid": "wrOgQhDgAAcwMTB7YmDkbeBsgT_xxxx",
+      "member_count": 35,
+      "added_at": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "group_0000000002",
+      "name": "海淀店客户群",
+      "chatid": "wrOgQhDgAAcwMTB7YmDkbeBsgT_yyyy",
+      "member_count": 42,
+      "added_at": "2024-01-01T00:00:00.000Z"
+    }
+  ]
+}

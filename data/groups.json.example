@@ -1,0 +1,14 @@
+{
+  "store_001": {
+    "name": "朝阳店",
+    "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "region": "北京",
+    "address": "朝阳区某某街道123号"
+  },
+  "store_002": {
+    "name": "海淀店",
+    "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
+    "region": "北京",
+    "address": "海淀区某某路456号"
+  }
+}

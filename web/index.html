@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>美容店来客通知管理后台</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 顶部导航栏 -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <div class="nav-brand">
+        <span class="brand-icon">🔔</span>
+        <span class="brand-text">美容店来客通知系统</span>
+      </div>
+      <div class="nav-status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">检查中...</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 主容器 -->
+  <div class="container">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <ul class="menu">
+        <li class="menu-item active" data-page="dashboard">
+          <span class="menu-icon">📊</span>
+          <span class="menu-text">概览</span>
+        </li>
+        <li class="menu-item" data-page="shops">
+          <span class="menu-icon">🏪</span>
+          <span class="menu-text">店铺管理</span>
+        </li>
+        <li class="menu-item" data-page="logs">
+          <span class="menu-icon">📝</span>
+          <span class="menu-text">消息日志</span>
+        </li>
+        <li class="menu-item" data-page="config">
+          <span class="menu-icon">⚙️</span>
+          <span class="menu-text">系统配置</span>
+        </li>
+        <li class="menu-item" data-page="webhook">
+          <span class="menu-icon">🔗</span>
+          <span class="menu-text">Webhook 测试</span>
+        </li>
+      </ul>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <!-- 概览页面 -->
+      <div id="dashboard" class="page-content active">
+        <h1 class="page-title">系统概览</h1>
+
+        <!-- 统计卡片 -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon">🏪</div>
+            <div class="stat-content">
+              <div class="stat-value" id="totalShops">-</div>
+              <div class="stat-label">已授权店铺</div>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-icon">💬</div>
+            <div class="stat-content">
+              <div class="stat-value" id="todayMessages">-</div>
+              <div class="stat-label">今日消息</div>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-icon">✅</div>
+            <div class="stat-content">
+              <div class="stat-value" id="successRate">-</div>
+              <div class="stat-label">推送成功率</div>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-icon">👥</div>
+            <div class="stat-content">
+              <div class="stat-value" id="totalCustomers">-</div>
+              <div class="stat-label">累计客户</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 最近消息 -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">最近消息</h2>
+            <button class="btn btn-sm" onclick="refreshDashboard()">刷新</button>
+          </div>
+          <div class="card-body">
+            <div id="recentMessages" class="message-list">
+              <div class="loading">加载中...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 店铺管理页面 -->
+      <div id="shops" class="page-content">
+        <h1 class="page-title">店铺管理</h1>
+
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">店铺列表</h2>
+            <button class="btn btn-primary" onclick="showAuthModal()">授权新店铺</button>
+          </div>
+          <div class="card-body">
+            <div id="shopsList" class="table-container">
+              <div class="loading">加载中...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 消息日志页面 -->
+      <div id="logs" class="page-content">
+        <h1 class="page-title">消息日志</h1>
+
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">历史记录</h2>
+            <div class="filter-group">
+              <select id="logShopFilter" class="form-select" onchange="loadLogs()">
+                <option value="">全部店铺</option>
+              </select>
+              <button class="btn btn-sm" onclick="loadLogs()">刷新</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="logsList" class="table-container">
+              <div class="loading">加载中...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 系统配置页面 -->
+      <div id="config" class="page-content">
+        <h1 class="page-title">系统配置</h1>
+
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">环境变量</h2>
+          </div>
+          <div class="card-body">
+            <div id="envVars" class="env-list">
+              <div class="loading">加载中...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Webhook 配置</h2>
+          </div>
+          <div class="card-body">
+            <div class="webhook-info">
+              <div class="info-item">
+                <label>抖音 Webhook 地址:</label>
+                <div class="input-group">
+                  <input type="text" id="webhookUrl" class="form-input" readonly>
+                  <button class="btn btn-sm" onclick="copyToClipboard('webhookUrl')">复制</button>
+                </div>
+              </div>
+              <div class="info-item">
+                <label>授权回调地址:</label>
+                <div class="input-group">
+                  <input type="text" id="callbackUrl" class="form-input" readonly>
+                  <button class="btn btn-sm" onclick="copyToClipboard('callbackUrl')">复制</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Webhook 测试页面 -->
+      <div id="webhook" class="page-content">
+        <h1 class="page-title">Webhook 测试</h1>
+
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">发送测试消息</h2>
+          </div>
+          <div class="card-body">
+            <form id="testForm" onsubmit="sendTestMessage(event)">
+              <div class="form-group">
+                <label>选择店铺:</label>
+                <select id="testShopId" class="form-select" required>
+                  <option value="">请选择...</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>测试消息:</label>
+                <textarea id="testMessage" class="form-textarea" rows="4" placeholder="输入测试消息内容..."></textarea>
+              </div>
+
+              <button type="submit" class="btn btn-primary">发送测试</button>
+            </form>
+
+            <div id="testResult" class="test-result"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 授权弹窗 -->
+  <div id="authModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>授权新店铺</h3>
+        <span class="modal-close" onclick="closeAuthModal()">&times;</span>
+      </div>
+      <div class="modal-body">
+        <p>请复制以下授权链接并在浏览器中打开:</p>
+        <div class="input-group">
+          <input type="text" id="authUrl" class="form-input" readonly>
+          <button class="btn btn-sm" onclick="copyToClipboard('authUrl')">复制</button>
+        </div>
+        <p class="hint">授权后将自动跳转回系统</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

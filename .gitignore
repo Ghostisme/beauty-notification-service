@@ -1,0 +1,11 @@
+node_modules/
+logs/*.log
+logs/*.log.*
+.env
+.DS_Store
+*.swp
+*.swo
+*~
+
+# 保留配置模板
+!data/groups.json.example

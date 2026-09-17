@@ -1,0 +1,16 @@
+[
+  {
+    "accountId": "7523898493467904038",
+    "accountName": "长沙市尹欣美容咨询有限公司",
+    "storeId": "store_001",
+    "region": "长沙",
+    "enabled": true
+  },
+  {
+    "accountId": "7605435122824890377",
+    "accountName": "超柔皮肤定制管理",
+    "storeId": "store_002",
+    "region": "河南许昌",
+    "enabled": true
+  }
+]
