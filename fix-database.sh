@@ -1,3 +1,10 @@
+#!/bin/bash
+
+# 修复 database 模块方法名不匹配问题
+
+echo "🔧 修复 database.js 方法名..."
+
+cat > /var/www/beauty-notification/src/database/index.js << 'EOF'
 /**
  * 数据库操作模块
  * 管理商户配置和消息日志
@@ -221,3 +228,32 @@ class Database {
 }
 
 module.exports = new Database();
+EOF
+
+echo "✅ database.js 已更新 (init -> initialize)"
+
+# 停止服务(避免重启风暴)
+pm2 stop beauty-notification
+
+# 等待2秒
+sleep 2
+
+# 启动服务
+pm2 start beauty-notification
+
+echo ""
+echo "📋 服务状态:"
+pm2 status beauty-notification
+
+sleep 3
+
+echo ""
+echo "📋 最新日志:"
+pm2 logs beauty-notification --lines 20 --nostream
+
+echo ""
+echo "🏥 健康检查:"
+curl -s http://localhost:3000/api/health | jq . || echo "健康检查失败"
+
+echo ""
+echo "✅ 修复完成!"
