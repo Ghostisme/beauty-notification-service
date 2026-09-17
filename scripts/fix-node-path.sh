@@ -57,6 +57,15 @@ if command -v npx &> /dev/null; then
     echo -e "${GREEN}✅ npx -> $NPX_PATH${NC}"
 fi
 
+# 如果存在 PM2,也创建链接
+if command -v pm2 &> /dev/null; then
+    PM2_PATH=$(which pm2)
+    sudo ln -sf "$PM2_PATH" /usr/local/bin/pm2
+    echo -e "${GREEN}✅ pm2 -> $PM2_PATH${NC}"
+else
+    echo -e "${YELLOW}⚠️  未检测到 PM2,将在部署时自动安装${NC}"
+fi
+
 echo ""
 
 # 验证
@@ -65,6 +74,11 @@ if sudo node -v &> /dev/null; then
     echo -e "${GREEN}✅ 修复成功!${NC}"
     echo -e "  - sudo node -v: $(sudo node -v)"
     echo -e "  - sudo npm -v: $(sudo npm -v)"
+
+    if sudo pm2 -v &> /dev/null 2>&1; then
+        echo -e "  - sudo pm2 -v: $(sudo pm2 -v)"
+    fi
+
     echo ""
     echo -e "${GREEN}现在可以执行部署脚本了:${NC}"
     echo -e "  curl -fsSL https://raw.githubusercontent.com/Ghostisme/beauty-notification-service/main/deploy-git.sh | sudo bash"
