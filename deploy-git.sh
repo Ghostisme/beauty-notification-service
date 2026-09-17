@@ -18,6 +18,10 @@ PROJECT_DIR="/var/www/beauty-notification"
 PROJECT_NAME="beauty-notification"
 NODE_VERSION="18"
 
+# Git 加速配置 - 使用镜像站加速克隆
+USE_MIRROR="${USE_MIRROR:-true}"
+GIT_MIRROR="https://ghproxy.com/"
+
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}美容店来客通知系统 - Git 部署${NC}"
 echo -e "${BLUE}=========================================${NC}"
@@ -90,7 +94,20 @@ if [ -d "$PROJECT_DIR/.git" ]; then
 else
     echo -e "${YELLOW}克隆代码仓库...${NC}"
     mkdir -p $(dirname $PROJECT_DIR)
-    git clone $REPO_URL $PROJECT_DIR
+
+    # 使用镜像加速克隆
+    CLONE_URL=$REPO_URL
+    if [ "$USE_MIRROR" = "true" ]; then
+        CLONE_URL="${GIT_MIRROR}${REPO_URL}"
+        echo -e "${BLUE}使用镜像加速: ${CLONE_URL}${NC}"
+    fi
+
+    # 尝试克隆,如果失败则回退到原始地址
+    if ! git clone --depth 1 $CLONE_URL $PROJECT_DIR; then
+        echo -e "${YELLOW}镜像克隆失败,尝试直接克隆...${NC}"
+        git clone --depth 1 $REPO_URL $PROJECT_DIR
+    fi
+
     cd $PROJECT_DIR
     echo -e "${GREEN}✅ 代码克隆完成${NC}"
 fi
