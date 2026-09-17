@@ -22,7 +22,81 @@ router.get('/health', (req, res) => {
 });
 
 /**
- * 抖音 Webhook 回调接口
+ * 抖音 SPI 回调接口 - GET 验证
+ * 用于验证 SPI 配置是否正确
+ */
+router.get('/douyin/spi/callback', (req, res) => {
+  const { token } = req.query;
+  const config = require('../config');
+
+  // 验证 token
+  if (token !== config.douyin.spiToken) {
+    logger.warn('[SPI验证] Token 不匹配', { receivedToken: token });
+    return res.status(403).json({ error: 'Invalid token' });
+  }
+
+  logger.info('[SPI验证] Token 验证通过');
+
+  // 返回成功响应
+  res.json({
+    code: 0,
+    message: 'success',
+    data: {
+      verified: true,
+      timestamp: new Date().toISOString()
+    }
+  });
+});
+
+/**
+ * 抖音 SPI 回调接口 - POST 接收事件
+ * 接收抖音推送的订单、评论等事件
+ */
+router.post('/douyin/spi/callback', async (req, res) => {
+  try {
+    const { token } = req.query;
+    const config = require('../config');
+
+    // 验证 token
+    if (token !== config.douyin.spiToken) {
+      logger.warn('[SPI回调] Token 不匹配');
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+
+    const body = req.body;
+
+    logger.info('[SPI回调] 收到抖音事件推送', {
+      event: body.event,
+      tag: body.tag,
+      app_id: body.app_id,
+    });
+
+    // 记录原始数据用于调试
+    logger.debug('[SPI回调] 完整数据', body);
+
+    // TODO: 后续实现具体的事件处理逻辑
+    // 根据 body.event 和 body.tag 判断事件类型
+    // 例如: order_status (订单状态), poi_order (到店订单), verify (核销) 等
+
+    // 暂时返回成功,表示已接收
+    res.json({
+      code: 0,
+      message: 'success',
+      data: {
+        received: true,
+        event: body.event,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    logger.error('[SPI回调] 处理失败', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * 抖音 Webhook 回调接口(旧版,保留兼容)
  * 接收抖音推送的消息
  */
 router.post('/douyin/webhook', async (req, res) => {
