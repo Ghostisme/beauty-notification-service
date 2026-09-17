@@ -1,12 +1,44 @@
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
 
 /**
  * 配置管理
- * 加载并管理门店配置
+ * 加载环境变量和门店配置
  */
 class Config {
   constructor() {
+    // 服务器配置
+    this.server = {
+      port: process.env.PORT || 3000,
+      env: process.env.NODE_ENV || 'development'
+    };
+
+    // 抖音配置
+    this.douyin = {
+      clientKey: process.env.DOUYIN_CLIENT_KEY,
+      clientSecret: process.env.DOUYIN_CLIENT_SECRET,
+      spiToken: process.env.DOUYIN_SPI_TOKEN
+    };
+
+    // 企业微信配置
+    this.wework = {
+      corpId: process.env.WEWORK_CORP_ID,
+      agentId: process.env.WEWORK_AGENT_ID,
+      secret: process.env.WEWORK_SECRET,
+      senderUserId: process.env.WEWORK_SENDER_USERID
+    };
+
+    // 数据库配置
+    this.database = {
+      host: process.env.DB_HOST || 'localhost',
+      port: process.env.DB_PORT || 3306,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME
+    };
+
+    // 门店配置
     this.groupsFile = path.join(__dirname, '../data/groups.json');
     this.groups = {};
     this.loadGroups();
