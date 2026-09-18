@@ -127,7 +127,7 @@ async function checkServerStatus() {
 async function loadDashboard() {
   try {
     // 加载统计数据
-    const statsRes = await fetch(`${API_BASE}/api/admin/shops`);
+    const statsRes = await fetch(`${API_BASE}/admin/shops`);
     if (statsRes.ok) {
       const statsData = await statsRes.json();
       if (statsData.code === 0) {
@@ -136,7 +136,7 @@ async function loadDashboard() {
     }
 
     // 加载最近消息
-    const logsRes = await fetch(`${API_BASE}/api/admin/logs?limit=10`);
+    const logsRes = await fetch(`${API_BASE}/admin/logs?limit=10`);
     if (logsRes.ok) {
       const logsData = await logsRes.json();
       if (logsData.code === 0) {
@@ -219,7 +219,7 @@ async function loadShops() {
   `;
 
   try {
-    const response = await fetch(`${API_BASE}/api/admin/shops`);
+    const response = await fetch(`${API_BASE}/admin/shops`);
     const data = await response.json();
 
     if (data.code === 0) {
@@ -351,7 +351,7 @@ async function configWeworkChat(shopId) {
   const chatName = prompt('请输入企微群名称(可选):') || '';
 
   try {
-    const response = await fetch(`${API_BASE}/api/admin/shops/${shopId}/wework-chat`, {
+    const response = await fetch(`${API_BASE}/admin/shops/${shopId}/wework-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chatId, chatName })
@@ -386,7 +386,7 @@ async function loadLogs() {
   `;
 
   try {
-    let url = `${API_BASE}/api/admin/logs?limit=100`;
+    let url = `${API_BASE}/admin/logs?limit=100`;
     if (shopFilter) {
       url += `&shopId=${shopFilter}`;
     }
@@ -530,7 +530,7 @@ async function sendTestMessage(event) {
   `;
 
   try {
-    const response = await fetch(`${API_BASE}/api/test/push`, {
+    const response = await fetch(`${API_BASE}/test/push`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shopId, testMessage })
