@@ -13,14 +13,65 @@
 #
 # 建议传 commit SHA 而不是分支名:raw 的 CDN 对分支名有缓存,刚 push 的内容可能
 # 要等几分钟才可见;SHA 指向不可变内容,不受缓存影响,拉到的一定是那一版。
+# 传 SHA 还会额外启用镜像源(见下方 MIRRORS),成功率高得多。
 
 # 不用 set -e:每个文件的下载失败要自己统计并继续,而不是中途整个退出
 set -uo pipefail
 
 REPO="Ghostisme/beauty-notification-service"
 REF="${1:-main}"
-BASE="https://raw.githubusercontent.com/${REPO}/${REF}"
 BACKUP_DIR=".sync-backup-$(date +%Y%m%d-%H%M%S)"
+
+# 下载源,按顺序尝试,第一个成功即止。
+#
+# 为什么要多源:raw 在国内是时通时断而非完全不可达 —— 实测同一次运行里 85 个
+# 文件成功、13 个 curl(28) 超时,是 DNS 轮询命中被干扰节点的特征。单源失败不
+# 代表内容拿不到,换个源往往立刻就成。
+MIRRORS=("https://raw.githubusercontent.com/${REPO}/${REF}")
+
+# 镜像站只在传 commit SHA 时启用:它们对分支名的缓存长达数小时,拿到的可能是
+# 旧版本,而这里最怕的就是版本混合(新版 index.js 配旧版 errors.js,启动直接崩)。
+# SHA 是不可变引用,任何源返回的都必然是同一份内容,才敢并用。
+if [[ "${REF}" =~ ^[0-9a-f]{7,40}$ ]]; then
+  MIRRORS+=(
+    "https://cdn.jsdelivr.net/gh/${REPO}@${REF}"
+    "https://raw.gitmirror.com/${REPO}/${REF}"
+  )
+fi
+
+# 把 curl 退出码翻成人话 —— 超时、404、DNS 挂掉的处理方式完全不同,
+# 只说"失败"等于把诊断成本推给下一个人
+curl_reason() {
+  case "$1" in
+    6)  echo "DNS 解析失败" ;;
+    7)  echo "连接被拒绝" ;;
+    22) echo "HTTP 错误(多半是 404,文件不在该 ref 下)" ;;
+    28) echo "超时" ;;
+    35|60) echo "TLS 握手失败" ;;
+    *)  echo "curl 退出码 $1" ;;
+  esac
+}
+
+# 逐个源尝试下载,成功返回 0;全部失败时把最后一次的原因写进全局 last_reason。
+#
+# --fail 不能省:不加的话 404 的响应正文("404: Not Found")会被原样写进文件,
+# 得到一个能通过语法检查但内容完全错误的 js,排查起来极费时间。
+# 不用 -S:错误由本函数统一汇报,curl 自己刷屏会把成功/失败的节奏搅乱。
+# 超时压到 15 秒是为了快速降级 —— 卡满 30 秒再换源,近百个文件能拖成十几分钟。
+last_reason=""
+fetch_file() {
+  local path="$1" out="$2" base rc
+  for base in "${MIRRORS[@]}"; do
+    curl -fsL --connect-timeout 5 --max-time 15 --retry 1 -o "${out}" "${base}/${path}"
+    rc=$?
+    if [ "${rc}" -eq 0 ] && [ -s "${out}" ]; then
+      return 0
+    fi
+    last_reason="$(curl_reason "${rc}")"
+    rm -f "${out}"
+  done
+  return 1
+}
 
 # 需要同步的文件清单 —— 版本库里全部跟踪的文件,减去下面三类排除项。
 #
@@ -151,6 +202,10 @@ echo "  仓库: ${REPO}"
 echo "  版本: ${REF}"
 echo "  目录: $(pwd)"
 echo "  文件: ${#FILES[@]} 个"
+echo "  下载源: ${#MIRRORS[@]} 个"
+if [ "${#MIRRORS[@]}" -eq 1 ]; then
+  echo "  提示: 传 commit SHA 可多启用 2 个镜像源,raw 不稳时成功率高得多"
+fi
 echo ""
 
 # 跑错目录会把文件散落到 home 或 / 下,事后极难清理,所以先认门
@@ -160,10 +215,10 @@ if [ ! -f "package.json" ] || [ ! -d "src" ]; then
   exit 1
 fi
 
-# 前置连通性检查:raw 整体不可达时立刻退出,免得刷近百条一样的失败
-if ! curl -fsSL --max-time 15 -o /dev/null "${BASE}/package.json"; then
-  echo "❌ 无法访问 ${BASE}"
-  echo "   可能原因:raw.githubusercontent.com 不可达,或 ref「${REF}」不存在。"
+# 前置连通性检查:所有源都拿不到时立刻退出,免得刷近百条一样的失败
+if ! fetch_file "package.json" "/dev/null"; then
+  echo "❌ 所有下载源都取不到内容(${last_reason})。"
+  echo "   可能原因:网络整体不可达,或 ref「${REF}」不存在。"
   exit 1
 fi
 
@@ -176,14 +231,11 @@ for path in "${FILES[@]}"; do
   tmp="${path}.sync-tmp"
   mkdir -p "$(dirname "${path}")"
 
-  # --fail 不能省:不加的话 404 的响应正文("404: Not Found")会被原样写进文件,
-  # 得到一个能通过语法检查但内容完全错误的 js,排查起来极费时间。
-  # 同理先落临时文件、校验非空后再 mv,避免下载中断留下半截文件顶掉好文件。
-  if ! curl -fsSL --max-time 30 -o "${tmp}" "${BASE}/${path}" || [ ! -s "${tmp}" ]; then
-    rm -f "${tmp}"
+  # 先落临时文件、校验非空后再 mv,避免下载中断留下半截文件顶掉好文件
+  if ! fetch_file "${path}" "${tmp}"; then
     fail=$((fail + 1))
     failed_files+=("${path}")
-    printf '  ❌ %s\n' "${path}"
+    printf '  ❌ %-42s %s\n' "${path}" "${last_reason}"
     continue
   fi
 
@@ -216,8 +268,20 @@ if [ "${fail}" -gt 0 ]; then
   echo ""
   echo "  以下文件未同步,当前仍是旧版本:"
   for f in "${failed_files[@]}"; do echo "    - ${f}"; done
+
+  # 部分失败比全失败更危险:新旧代码混在一起(新版 index.js 配旧版 errors.js)
+  # 会在运行时才炸,报错还指不到真正的原因。所以这里必须拦住,不能只列个清单
+  # 就让人以为"大部分成功了,可以往下走"。
+  if printf '%s\n' "${failed_files[@]}" | grep -q '^src/'; then
+    echo ""
+    echo "  ⚠️  失败清单里有 src/ 下的运行时代码,当前是新旧混合状态。"
+    echo "     此时不要 pm2 restart,也不要跑测试脚本 —— 报错会指向错误的方向。"
+  fi
+
   echo ""
-  echo "  重跑本脚本可只补这几个(内容没变的会自动跳过,无副作用)。"
+  echo "  重跑本脚本即可只补这几个(内容没变的会自动跳过,无副作用)。"
+  echo "  反复失败时改用 commit SHA 重跑,会多启用 2 个镜像源:"
+  echo "    bash scripts/sync-from-raw.sh <commit-sha>"
   exit 1
 fi
 
