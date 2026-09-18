@@ -9,6 +9,45 @@ const douyinAPI = require('../services/douyin');
 const weworkAPI = require('../services/wework');
 const database = require('../database');
 const logger = require('../utils/logger');
+const fs = require('fs');
+const path = require('path');
+
+const memberStorePath = path.join(__dirname, '../../data/douyin-members.json');
+
+function saveDouyinMember(body) {
+  if (!body.account_id || !body.open_id) return;
+  let members = [];
+  try {
+    if (fs.existsSync(memberStorePath)) members = JSON.parse(fs.readFileSync(memberStorePath, 'utf8'));
+    if (!Array.isArray(members)) members = [];
+  } catch (error) {
+    logger.warn('[会员入会] 会员本地记录读取失败，将重新建立记录', { message: error.message });
+  }
+  const key = `${body.account_id}:${body.open_id}`;
+  const index = members.findIndex((item) => item.key === key);
+  const record = {
+    key,
+    account_id: String(body.account_id),
+    open_id: String(body.open_id),
+    // mobile is encrypted in the SPI request; do not persist it here.
+    updated_at: new Date().toISOString(),
+  };
+  if (index >= 0) members[index] = { ...members[index], ...record };
+  else members.push(record);
+  fs.mkdirSync(path.dirname(memberStorePath), { recursive: true });
+  fs.writeFileSync(memberStorePath, `${JSON.stringify(members, null, 2)}\n`, 'utf8');
+  return { isNewMember: index < 0 };
+}
+
+function verifyMemberSpi(req) {
+  const signatureUtil = require('../utils/douyin-signature');
+  if (!req.headers['x-life-clientkey'] || !req.headers['x-life-sign']) return false;
+  return signatureUtil.verifyHeaderSignature(
+    req.headers,
+    req.query,
+    req.rawBody ?? ''
+  );
+}
 
 /**
  * 健康检查接口
@@ -27,26 +66,9 @@ router.get('/health', (req, res) => {
  * 文档: https://developer.open-douyin.com/docs/resource/zh-CN/local-life/develop/preparation/spi-signature-rules
  */
 router.get('/douyin/spi/callback', (req, res) => {
-  const { token } = req.query;
-  const config = require('../config');
-
-  // 验证 token
-  if (token !== config.douyin.spiToken) {
-    logger.warn('[SPI回调] Token 不匹配', { receivedToken: token });
-    return res.status(403).json({ error: 'Invalid token' });
-  }
-
-  logger.info('[SPI回调] Token 验证通过');
-
-  // 返回成功响应
-  res.json({
-    code: 0,
-    message: 'success',
-    data: {
-      verified: true,
-      timestamp: new Date().toISOString()
-    }
-  });
+  // Some console URL checks use GET. Do not require a custom query token:
+  // Douyin SPI authenticates business requests with x-life-sign.
+  res.json({ code: 0, message: 'success' });
 });
 
 /**
@@ -55,71 +77,43 @@ router.get('/douyin/spi/callback', (req, res) => {
  * 接收平台主动调用的业务事件,必须验证签名
  * 文档: https://developer.open-douyin.com/docs/resource/zh-CN/local-life/develop/preparation/spi-signature-rules
  */
-router.post('/douyin/spi/callback', async (req, res) => {
+const memberJoinHandler = async (req, res) => {
   try {
-    const { token } = req.query;
-    const config = require('../config');
-    const signatureUtil = require('../utils/douyin-signature');
-
-    // 1. 验证自定义 token (基础安全)
-    if (token !== config.douyin.spiToken) {
-      logger.warn('[SPI回调] Token 不匹配');
-      return res.status(403).json({ error: 'Invalid token' });
-    }
-
-    // 2. 验证 SPI 签名 (必须)
-    const xLifeSign = req.headers['x-life-sign'];
-
-    if (!xLifeSign) {
+    if (!verifyMemberSpi(req)) {
       logger.warn('[SPI回调] 缺少签名 header');
       return res.status(403).json({ error: 'Missing signature' });
     }
-
-    const body = req.body;
-    const rawBody = JSON.stringify(body);
-    const isValidSignature = signatureUtil.verifyHeaderSignature(
-      req.headers,
-      req.query,
-      rawBody
-    );
-
-    if (!isValidSignature) {
-      logger.warn('[SPI回调] 签名验证失败');
-      return res.status(403).json({ error: 'Invalid signature' });
+    const body = req.body || {};
+    if (!body.account_id || !body.open_id) {
+      return res.status(200).json({ data: { error_code: 200, description: 'account_id/open_id missing' } });
     }
-
-    logger.info('[SPI回调] 签名验证通过');
-
-    // 3. 处理业务事件
-    const event = body.event;
-
-    logger.info('[SPI回调] 收到业务事件', {
-      event: event,
-      client_key: body.client_key,
+    const result = saveDouyinMember(body);
+    logger.info('[会员入会] 已接收并保存 open_id', {
+      account_id: String(body.account_id),
+      open_id: String(body.open_id),
+      is_new_member: result.isNewMember,
+      logid: req.headers['x-bytedance-logid'] || null,
     });
-
-    // 记录原始数据用于调试
-    logger.debug('[SPI回调] 完整数据', body);
-
-    // TODO: 实现具体的 SPI 业务逻辑
-    // 根据 body.event 处理不同类型的回调
-
-    // 返回成功响应
-    res.json({
-      code: 0,
-      message: 'success',
+    return res.status(200).json({
       data: {
-        received: true,
-        event: event,
-        timestamp: new Date().toISOString()
-      }
+        error_code: 0,
+        description: '',
+        point_amount_cent: 0,
+        user_level: 1,
+        is_new_member: result.isNewMember,
+      },
     });
 
   } catch (error) {
     logger.error('[SPI回调] 处理失败', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(200).json({ data: { error_code: 100, description: 'temporary internal error' } });
   }
-});
+};
+
+router.post('/douyin/spi/callback', memberJoinHandler);
+// Dedicated aliases make it explicit which URL to configure for the member
+// join SPI while keeping the previously configured callback URL working.
+router.post('/douyin/spi/member/join', memberJoinHandler);
 
 /**
  * 抖音 Webhooks 回调接口 - POST

@@ -22,7 +22,13 @@ class Server {
    */
   setupMiddleware() {
     // 解析 JSON 请求体
-    this.app.use(bodyParser.json());
+    // Preserve the exact bytes: Douyin SPI signatures are calculated over the
+    // original HTTP body, not over JSON.stringify(req.body).
+    this.app.use(bodyParser.json({
+      verify: (req, res, buffer) => {
+        req.rawBody = buffer.toString('utf8');
+      },
+    }));
     this.app.use(bodyParser.urlencoded({ extended: true }));
 
     // 请求日志

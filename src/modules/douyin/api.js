@@ -1,145 +1,122 @@
 /**
- * 抖音API模块
- * 负责调用抖音开放平台的HTTP API
+ * 抖音 API 组合层
+ *
+ * 本文件不再自己发 HTTP 请求,只负责把下列单职责模块装配起来并对外暴露稳定接口:
+ *   token-manager  → access_token 的获取/提前刷新/失效作废/并发去重
+ *   http-client    → 统一请求出口(业务错误码判定、退避重试、QPS 节流)
+ *   order-query    → order.query 接口封装(分页、游标、多种查询维度)
+ *
+ * 保持 init / getAccessToken / getOrderDetail 的既有签名不变:
+ * debug-order.js、debug-phone.js、douyin-flow.js、test-douyin*.js 都在直接调用它们。
  */
 
-const axios = require('axios');
+const TokenManager = require('./token-manager');
+const DouyinHttpClient = require('./http-client');
+const OrderQueryAPI = require('./order-query');
 const logger = require('../../utils/logger');
 
 class DouyinAPI {
-  constructor() {
-    this.baseURL = 'https://open.douyin.com';
-    this.accessToken = null;
-    this.tokenExpireTime = 0;
-    // 直接从环境变量读取配置
-    this.clientKey = process.env.DOUYIN_CLIENT_KEY;
-    this.clientSecret = process.env.DOUYIN_CLIENT_SECRET;
+  /**
+   * @param {Object} [options] - 透传给 TokenManager / DouyinHttpClient 的覆盖项,便于测试注入
+   * @param {string} [options.baseURL] - 抖音开放平台域名
+   * @param {string} [options.clientKey] - 覆盖配置中的 client_key
+   * @param {string} [options.clientSecret] - 覆盖配置中的 client_secret
+   * @param {number} [options.minRequestInterval] - 相邻请求最小间隔(毫秒)
+   */
+  constructor(options = {}) {
+    this.baseURL = options.baseURL || 'https://open.douyin.com';
+
+    this.tokenManager = new TokenManager({
+      baseURL: this.baseURL,
+      clientKey: options.clientKey,
+      clientSecret: options.clientSecret,
+      refreshAdvanceSeconds: options.refreshAdvanceSeconds,
+      maxRetries: options.tokenMaxRetries,
+      timeout: options.tokenTimeout,
+    });
+
+    this.http = new DouyinHttpClient(this.tokenManager, {
+      baseURL: this.baseURL,
+      minRequestInterval: options.minRequestInterval,
+      maxRetries: options.httpMaxRetries,
+      timeout: options.httpTimeout,
+    });
+
+    this.orderQuery = new OrderQueryAPI(this.http);
   }
 
   /**
-   * 初始化(获取access_token)
+   * 初始化:预热 access_token,让配置错误在启动期暴露而不是等第一笔订单进来才炸。
+   * @returns {Promise<void>}
    */
   async init() {
     try {
       await this.getAccessToken();
       logger.info('[抖音API] 初始化成功');
     } catch (error) {
-      logger.error('[抖音API] 初始化失败:', error);
+      logger.error('[抖音API] 初始化失败:', { message: error.message });
       throw error;
     }
   }
 
   /**
-   * 获取access_token
-   * 服务商应用使用client_token模式
+   * 获取可用的 access_token。
+   *
+   * 缓存与刷新策略全部下沉到 TokenManager,这里只做转发。
+   *
+   * @param {Object} [options]
+   * @param {boolean} [options.forceRefresh=false] - 忽略缓存强制换新
+   * @returns {Promise<string>} access_token
    */
-  async getAccessToken() {
-    // Token未过期则直接返回
-    if (this.accessToken && Date.now() < this.tokenExpireTime) {
-      return this.accessToken;
-    }
-
-    try {
-      logger.info('[抖音API] 正在获取access_token...');
-
-      const response = await axios.post(
-        `${this.baseURL}/oauth/client_token/`,
-        {
-          client_key: this.clientKey,
-          client_secret: this.clientSecret,
-          grant_type: 'client_credential',
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (response.data.data && response.data.data.access_token) {
-        this.accessToken = response.data.data.access_token;
-        const expiresIn = response.data.data.expires_in || 7200;
-        // 提前5分钟刷新
-        this.tokenExpireTime = Date.now() + (expiresIn - 300) * 1000;
-
-        logger.info('[抖音API] access_token获取成功', {
-          expiresIn,
-          token: this.accessToken.substring(0, 20) + '...',
-        });
-
-        return this.accessToken;
-      }
-
-      throw new Error(
-        `获取access_token失败: ${JSON.stringify(response.data)}`
-      );
-    } catch (error) {
-      logger.error('[抖音API] 获取access_token失败:', {
-        message: error.message,
-        response: error.response?.data,
-      });
-      throw error;
-    }
+  getAccessToken(options = {}) {
+    return this.tokenManager.getToken(options);
   }
 
   /**
-   * 查询订单详情
-   * @param {string} orderId - 抖音订单ID
-   * @param {string} accountId - 商户账户ID
-   * @returns {Promise<Object|null>} 订单详情
+   * token 状态快照,供健康检查/诊断使用。
+   * @returns {{hasToken: boolean, expireAt: string|null, remainSeconds: number, refreshing: boolean}}
+   */
+  getTokenStatus() {
+    return this.tokenManager.getStatus();
+  }
+
+  /**
+   * 查询订单详情。
+   *
+   * @param {string} orderId - 抖音生活服务订单 ID
+   * @param {string} accountId - 来客商户根账户 ID
+   * @returns {Promise<Object|null>} 订单对象,不存在时返回 null
    */
   async getOrderDetail(orderId, accountId) {
-    try {
-      const token = await this.getAccessToken();
+    logger.info('[抖音API] 开始查询订单详情:', { orderId, accountId });
 
-      logger.info('[抖音API] 开始查询订单详情:', { orderId, accountId });
-
-      const response = await axios.get(
-        `${this.baseURL}/goodlife/v1/trade/order/query/`,
-        {
-          headers: {
-            'access-token': token,
-            'content-type': 'application/json',
-          },
-          params: {
-            account_id: accountId,
-            order_id: orderId,
-            page_num: 1,
-            page_size: 1,
-          },
-        }
-      );
-
-      logger.info('[抖音API] 订单查询响应:', {
-        error_code: response.data.extra?.error_code,
-        order_count: response.data.data?.orders?.length || 0,
+    const order = await this.orderQuery.queryByOrderId(orderId, accountId);
+    if (order) {
+      logger.info('[抖音API] 订单详情获取成功:', {
+        orderId: order.order_id,
+        productName: order.products?.[0]?.product_name,
       });
-
-      if (
-        response.data.extra.error_code === 0 &&
-        response.data.data.orders?.length > 0
-      ) {
-        const order = response.data.data.orders[0];
-        logger.info('[抖音API] 订单详情获取成功:', {
-          orderId: order.order_id,
-          productName: order.products?.[0]?.product_name,
-        });
-        return order;
-      }
-
-      logger.warn('[抖音API] 订单不存在或查询失败:', {
-        orderId,
-        response: response.data,
-      });
-      return null;
-    } catch (error) {
-      logger.error('[抖音API] 查询订单详情异常:', {
-        orderId,
-        message: error.message,
-        response: error.response?.data,
-      });
-      throw error;
     }
+
+    return order;
+  }
+
+  /**
+   * 分页查询订单列表。
+   * @param {Object} options - 见 OrderQueryAPI#queryPage
+   * @returns {Promise<Object>} 归一化的分页结果
+   */
+  queryOrders(options) {
+    return this.orderQuery.queryPage(options);
+  }
+
+  /**
+   * 遍历取回满足条件的全部订单(自动翻页,深翻页时自动切游标)。
+   * @param {Object} options - 见 OrderQueryAPI#iterate
+   * @returns {Promise<Array<Object>>} 订单数组
+   */
+  queryAllOrders(options) {
+    return this.orderQuery.queryAll(options);
   }
 }
 

@@ -8,6 +8,8 @@ const DouyinModule = require('./modules/douyin');
 const logger = require('./utils/logger');
 
 const douyin = new DouyinModule();
+const OrderProcessor = require('./modules/douyin/order-processor');
+const processor = new OrderProcessor(douyin);
 
 // 你的商户账户ID
 const ACCOUNT_ID = '7523898493467904038';
@@ -31,10 +33,9 @@ async function step1_testAccessToken() {
 
     console.log('\n✅ access_token 获取成功!\n');
     console.log('Token信息:');
-    console.log('  完整token:', token);
     console.log('  Token长度:', token.length);
-    console.log('  前20字符:', token.substring(0, 20) + '...');
-    console.log('  过期时间:', new Date(douyin.api.tokenExpireTime).toLocaleString());
+    // 过期时间由 TokenManager 统一维护,不再从 api 实例上读裸属性
+    console.log('  Token状态:', douyin.api.getTokenStatus());
     console.log('');
 
     return token;
@@ -51,14 +52,17 @@ async function step1_testAccessToken() {
 
 /**
  * 步骤2: 测试查询订单列表(不指定订单ID)
+ *
+ * 走 api.queryOrders 而非自己发请求:token 注入、频控节流、错误码判定与
+ * 处置指引(如 2119013 的 IP 白名单提示)都在统一请求层里,自己拼 axios 会全部丢掉。
+ * 因此这里也不再需要 token 实参 —— 凭证由 TokenManager 按需取用。
  */
-async function step2_testOrderList(token, accountId) {
+async function step2_testOrderList(accountId) {
   console.log('\n========================================');
   console.log('步骤2: 查询订单列表');
   console.log('========================================\n');
 
   console.log('请求参数:');
-  console.log('  access_token:', token.substring(0, 20) + '...');
   console.log('  account_id:', accountId);
   console.log('  page_num: 1');
   console.log('  page_size: 10');
@@ -67,40 +71,19 @@ async function step2_testOrderList(token, accountId) {
   try {
     console.log('正在调用订单查询API...');
 
-    const axios = require('axios');
-    const response = await axios.get(
-      'https://open.douyin.com/goodlife/v1/trade/order/query/',
-      {
-        headers: {
-          'access-token': token,
-          'content-type': 'application/json',
-        },
-        params: {
-          account_id: accountId,
-          page_num: 1,
-          page_size: 10,
-        },
-      }
-    );
+    const { orders, page } = await douyin.api.queryOrders({
+      accountId,
+      pageNum: 1,
+      pageSize: 10,
+    });
 
     console.log('\n✅ API调用成功!\n');
     console.log('响应信息:');
-    console.log('  error_code:', response.data.extra.error_code);
-    console.log('  description:', response.data.extra.description || 'success');
-    console.log('  订单数量:', response.data.data.orders?.length || 0);
+    console.log('  本页订单数:', orders.length);
+    console.log('  订单总数:', page.total);
     console.log('');
 
-    if (response.data.extra.error_code !== 0) {
-      console.error('❌ API返回错误:');
-      console.error('  错误码:', response.data.extra.error_code);
-      console.error('  错误描述:', response.data.extra.description);
-      console.error('  子错误码:', response.data.extra.sub_error_code);
-      console.error('  子错误描述:', response.data.extra.sub_description);
-      console.error('');
-      return null;
-    }
-
-    if (!response.data.data.orders || response.data.data.orders.length === 0) {
+    if (orders.length === 0) {
       console.log('⚠️  没有查询到订单');
       console.log('');
       console.log('可能原因:');
@@ -112,7 +95,7 @@ async function step2_testOrderList(token, accountId) {
     }
 
     console.log('📦 查询到的订单列表:\n');
-    response.data.data.orders.forEach((order, index) => {
+    orders.forEach((order, index) => {
       console.log(`订单 ${index + 1}:`);
       console.log('  订单ID:', order.order_id);
       console.log('  状态:', douyin._getOrderStatusText(order.order_status));
@@ -126,12 +109,13 @@ async function step2_testOrderList(token, accountId) {
       console.log('');
     });
 
-    return response.data.data.orders;
+    return orders;
   } catch (error) {
+    // DouyinAPIError 的 message 已拼好「错误码 + 描述 + 处置指引」,直接打即可
     console.error('\n❌ 查询订单失败!\n');
     console.error('错误信息:', error.message);
-    if (error.response?.data) {
-      console.error('API返回:', JSON.stringify(error.response.data, null, 2));
+    if (error.logId) {
+      console.error('logid(报障时提供给抖音):', error.logId);
     }
     console.error('');
     throw error;
@@ -162,7 +146,8 @@ async function step3_testOrderDetail(orderId, accountId) {
     console.log('\n✅ 订单详情查询成功!\n');
 
     // 提取字段
-    const extracted = douyin.extractOrderFields(order, {});
+    const extracted = await processor.decryptAndExtract(order, accountId);
+    console.log('   手机号状态:', extracted.customerPhoneStatus, '解密状态:', extracted.decryptionStatus);
 
     console.log('📋 提取的核心字段:\n');
     console.log('1. 客户手机号:', extracted.customerPhone);
@@ -193,14 +178,11 @@ async function main() {
   console.log('╚════════════════════════════════════════╝');
 
   try {
-    // 步骤1: 获取access_token
-    const token = await step1_testAccessToken();
-
-    // 等待1秒
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // 步骤1: 获取access_token(仅为验证凭证链路,后续请求的 token 由 TokenManager 自行注入)
+    await step1_testAccessToken();
 
     // 步骤2: 查询订单列表
-    const orders = await step2_testOrderList(token, ACCOUNT_ID);
+    const orders = await step2_testOrderList(ACCOUNT_ID);
 
     if (!orders || orders.length === 0) {
       console.log('⚠️  无法继续测试,因为没有订单数据');

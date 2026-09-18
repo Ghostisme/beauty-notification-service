@@ -7,18 +7,30 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "node src/test.js",
-    "test:webhook": "node test-webhook.js"
+    "test:webhook": "node test-webhook.js",
+    "test:douyin": "node --test tests/douyin.test.js",
+    "check:douyin": "node scripts/check-douyin.js"
   },
-  "keywords": ["douyin", "wework", "webhook"],
+  "keywords": [
+    "douyin",
+    "wework",
+    "webhook"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
     "axios": "^1.6.0",
+    "bcryptjs": "^3.0.3",
+    "body-parser": "^1.20.2",
+    "cookie-parser": "^1.4.7",
     "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
-    "body-parser": "^1.20.2",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.6.0",
+    "svg-captcha": "^1.4.0",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {

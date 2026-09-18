@@ -6,14 +6,14 @@
 const DouyinAPI = require('./api');
 const DouyinSPI = require('./spi');
 const DouyinDecrypt = require('./decrypt');
+const { isEncrypted } = require('./sensitive-fields');
 
 class DouyinModule {
-  constructor() {
-    this.api = new DouyinAPI();
+  constructor(options = {}) {
+    this.api = new DouyinAPI(options);
     this.spi = new DouyinSPI();
-    this.decrypt = new DouyinDecrypt();
-    // 注入API实例到解密模块
-    this.decrypt.setAPIInstance(this.api);
+    // 解密走 api 内部的统一请求层,与业务接口共用 token 刷新、频控退避和错误码判定
+    this.decrypt = new DouyinDecrypt(this.api.http);
   }
 
   /**
@@ -48,51 +48,24 @@ class DouyinModule {
    * @param {string} accountId - 商户账户ID
    * @returns {Promise<Object>} 解密结果映射
    */
-  async decryptFields(encryptedValues, accountId) {
-    return await this.decrypt.decryptBatch(encryptedValues, accountId);
+  async decryptFields(encryptedValues, accountId, options = {}) {
+    return await this.decrypt.decryptBatch(encryptedValues, accountId, options);
   }
 
   /**
    * 提取用户需要的订单字段
    * @param {Object} order - 完整订单对象
-   * @param {Object} decryptedData - 解密数据映射
+   * @param {Object} [decryptedData] - 解密映射 {密文: 明文};订单已被 applyDecryptedValues
+   *   原地回填时可省略,仅为兼容"自行解密后直接传表"的旧调用方保留
    * @returns {Object} 格式化后的订单信息
    */
   extractOrderFields(order, decryptedData = {}) {
     const product = order.products?.[0] || {};
 
-    // 提取客户手机号
-    let customerPhone = '未获取';
-    if (order.contacts?.[0]?.phone) {
-      // 联系人手机号
-      customerPhone = order.contacts[0].phone;
-      // 如果已解密,使用解密后的
-      if (decryptedData[customerPhone]) {
-        customerPhone = decryptedData[customerPhone];
-      }
-    } else if (order.open_id) {
-      // 如果没有手机号,使用open_id
-      customerPhone = `用户ID: ${order.open_id}`;
-    }
-
-    // 提取价格信息(订单维度)
-    const orderPrice = order.original_amount ? (order.original_amount / 100).toFixed(2) : '0.00';
-    const actualPrice = order.pay_amount ? (order.pay_amount / 100).toFixed(2) : '0.00';
-
-    // 提取店铺名称
-    let shopName = '未知店铺';
-    let shopId = '';
-    if (order.order_sale_info?.transfer_nickName) {
-      shopName = order.order_sale_info.transfer_nickName;
-    }
-    // 店铺ID从poi_id获取
-    if (order.intention_poi_id) {
-      shopId = order.intention_poi_id;
-    }
-
     return {
       // 1. 客户手机号
-      customerPhone,
+      customerPhone: this._resolveCustomerPhone(order, decryptedData),
+      customerPhoneStatus: this._phoneStatus(this._resolveCustomerPhone(order, decryptedData)),
 
       // 2. 下单时间
       orderTime: this._formatTimestamp(order.create_order_time),
@@ -103,12 +76,12 @@ class DouyinModule {
       productId: product.product_id || order.sku_id || '',
 
       // 4. 下单价格
-      orderPrice, // 原价
-      actualPrice, // 实付金额
+      orderPrice: this._formatAmount(order.original_amount ?? order.amount_info?.origin_amount), // 原价
+      actualPrice: this._formatAmount(order.pay_amount ?? order.amount_info?.pay_amount), // 实付金额
 
       // 5. 店铺名称
-      shopName,
-      shopId,
+      shopName: order.merchant_info?.account_name || order.order_sale_info?.transfer_nickName || '未知店铺',
+      shopId: order.intention_poi_id || order.merchant_info?.account_id || '',
 
       // 其他有用字段
       orderId: order.order_id,
@@ -124,6 +97,57 @@ class DouyinModule {
       saleChannel: order.order_sale_info?.sale_channel || '',
       saleRole: order.order_sale_info?.sale_role || '',
     };
+  }
+
+  /**
+   * 解析客户手机号,按可用性逐级降级。
+   *
+   * 正常链路里 order-processor 已用 applyDecryptedValues 把明文原地回填,
+   * 此处第一候选直接就是明文;查表仅兜住两种情况:调用方自带解密表,
+   * 或某字段解密失败仍是密文(此时降级到 open_id,避免把 `Enc.xxx` 推给客服)。
+   *
+   * @private
+   * @param {Object} order - 订单对象
+   * @param {Object} decryptedData - 解密映射
+   * @returns {string} 手机号明文,或降级后的替代标识
+   */
+  _resolveCustomerPhone(order, decryptedData) {
+    const candidates = [
+      order.contacts?.[0]?.phone,
+      order.contacts?.[0]?.phone_encrypt,
+      order.buyer_info?.buyer_real_phone,
+      order.buyer_info?.buyer_phone,
+    ];
+
+    let masked = null;
+    for (const raw of candidates) {
+      if (!raw) continue;
+
+      const plain = decryptedData[raw] || raw;
+      // 仍是密文说明该字段没解出来,继续看下一个候选
+      if (typeof plain !== 'string' || isEncrypted(plain)) continue;
+      if (this._phoneStatus(plain) === 'available') return plain;
+      if (this._phoneStatus(plain) === 'masked') masked ||= plain;
+    }
+
+    return masked || (order.open_id ? `用户ID: ${order.open_id}` : '未获取');
+  }
+
+  _phoneStatus(value) {
+    if (typeof value !== 'string') return 'unavailable';
+    if (/^[+\d][\d ()-]{5,20}$/.test(value)) return 'available';
+    if (/^[\d+][\d* -]+$/.test(value) && value.includes('*')) return 'masked';
+    return 'unavailable';
+  }
+
+  /**
+   * 分转元并保留两位小数。
+   * @private
+   * @param {number|undefined} amountInCents - 以分为单位的金额
+   * @returns {string}
+   */
+  _formatAmount(amountInCents) {
+    return amountInCents ? (amountInCents / 100).toFixed(2) : '0.00';
   }
 
   /**

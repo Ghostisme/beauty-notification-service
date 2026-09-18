@@ -18,6 +18,8 @@ const DouyinModule = require('./modules/douyin');
 const logger = require('./utils/logger');
 
 const douyin = new DouyinModule();
+const OrderProcessor = require('./modules/douyin/order-processor');
+const processor = new OrderProcessor(douyin);
 
 /**
  * 步骤1: 获取 access_token
@@ -30,8 +32,8 @@ async function step1_getAccessToken() {
   try {
     const token = await douyin.api.getAccessToken();
     console.log('✅ access_token 获取成功');
-    console.log('   Token:', token.substring(0, 30) + '...');
-    console.log('   过期时间:', new Date(douyin.api.tokenExpireTime).toLocaleString());
+    // 过期时间由 TokenManager 统一维护,不再从 api 实例上读裸属性
+    console.log('   Token状态:', douyin.api.getTokenStatus());
     return token;
   } catch (error) {
     console.error('❌ 获取 access_token 失败:', error.message);
@@ -41,8 +43,11 @@ async function step1_getAccessToken() {
 
 /**
  * 步骤2: 查询订单列表
+ *
+ * 走 api.queryOrders 而非自己发请求:token 注入、频控节流、错误码判定与
+ * 处置指引(如 2119013 的 IP 白名单提示)都在统一请求层里,自己拼 axios 会全部丢掉。
  */
-async function step2_getOrderList(token, accountId, pageSize = 20) {
+async function step2_getOrderList(accountId, pageSize = 20) {
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('步骤 2/3: 查询订单列表');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -53,30 +58,13 @@ async function step2_getOrderList(token, accountId, pageSize = 20) {
   console.log('');
 
   try {
-    const axios = require('axios');
-    const response = await axios.get(
-      'https://open.douyin.com/goodlife/v1/trade/order/query/',
-      {
-        headers: {
-          'access-token': token,
-          'content-type': 'application/json',
-        },
-        params: {
-          account_id: accountId,
-          page_num: 1,
-          page_size: pageSize,
-        },
-      }
-    );
+    const { orders, page } = await douyin.api.queryOrders({
+      accountId,
+      pageNum: 1,
+      pageSize,
+    });
 
-    if (response.data.extra.error_code !== 0) {
-      throw new Error(
-        `API错误: ${response.data.extra.description} (${response.data.extra.error_code})`
-      );
-    }
-
-    const orders = response.data.data.orders || [];
-    console.log(`✅ 查询成功,共 ${orders.length} 个订单\n`);
+    console.log(`✅ 查询成功,本页 ${orders.length} 个订单,总计 ${page.total}\n`);
 
     return orders;
   } catch (error) {
@@ -105,7 +93,8 @@ async function step3_getOrderDetail(orderId, accountId) {
       throw new Error('订单不存在或查询失败');
     }
 
-    const extracted = douyin.extractOrderFields(order, {});
+    const extracted = await processor.decryptAndExtract(order, accountId);
+    console.log('   手机号状态:', extracted.customerPhoneStatus, '解密状态:', extracted.decryptionStatus);
 
     console.log('✅ 订单详情查询成功\n');
 
@@ -151,8 +140,8 @@ async function commandList(accountId, pageSize = 20) {
   console.log('╚════════════════════════════════════════╝');
 
   await douyin.init();
-  const token = await step1_getAccessToken();
-  const orders = await step2_getOrderList(token, accountId, pageSize);
+  await step1_getAccessToken();
+  const orders = await step2_getOrderList(accountId, pageSize);
 
   console.log('订单列表:\n');
   orders.forEach((order, index) => {
@@ -176,9 +165,9 @@ async function commandDetail(orderId, accountId) {
   console.log('╚════════════════════════════════════════╝');
 
   await douyin.init();
-  const token = await step1_getAccessToken();
-  // 验证token可用
-  await step2_getOrderList(token, accountId, 1);
+  await step1_getAccessToken();
+  // 先拉一页验证凭证与授权可用,再查详情,便于区分"token 问题"和"订单问题"
+  await step2_getOrderList(accountId, 1);
   const orderData = await step3_getOrderDetail(orderId, accountId);
 
   printOrderInfo(orderData);
@@ -197,8 +186,8 @@ async function commandBatch(accountId, count = 5) {
   console.log('╚════════════════════════════════════════╝');
 
   await douyin.init();
-  const token = await step1_getAccessToken();
-  const orders = await step2_getOrderList(token, accountId, count);
+  await step1_getAccessToken();
+  const orders = await step2_getOrderList(accountId, count);
 
   console.log(`开始提取前 ${Math.min(count, orders.length)} 个订单的详细信息...\n`);
 

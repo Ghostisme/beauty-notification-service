@@ -41,8 +41,14 @@ fi
 echo -e "${YELLOW}⚠️  sudo 环境无法访问 Node.js,开始创建符号链接...${NC}"
 echo ""
 
+# 提示需要 sudo 权限
+echo -e "${YELLOW}需要 sudo 权限来创建符号链接,请输入密码:${NC}"
+echo ""
+
 # 创建符号链接
 echo -e "${YELLOW}创建符号链接到 /usr/local/bin/ ...${NC}"
+
+sudo -v || { echo -e "${RED}❌ 需要 sudo 权限${NC}"; exit 1; }
 
 sudo ln -sf "$NODE_PATH" /usr/local/bin/node
 echo -e "${GREEN}✅ node -> $NODE_PATH${NC}"
