@@ -34,13 +34,35 @@ cd "$APP_DIR"
 
 echo "==> [1/6] 检查 Docker"
 if ! command -v docker >/dev/null 2>&1; then
-  echo "    未安装 Docker, 正在安装..."
-  curl -fsSL https://get.docker.com | bash
+  echo "    未安装 Docker, 优先走阿里云镜像安装(国内网络)..."
+  if ! curl -fsSL https://get.docker.com -o /tmp/getdocker.sh; then
+    echo "    get.docker.com 不可达, 改用 apt 安装..."
+    apt-get update -y
+    apt-get install -y docker.io docker-compose-v2
+  else
+    bash /tmp/getdocker.sh --mirror Aliyun
+  fi
   systemctl enable --now docker
 fi
 if ! docker compose version >/dev/null 2>&1; then
-  echo "    缺少 docker compose 插件, 请确认 Docker 已正确安装"
-  exit 1
+  echo "    缺少 docker compose 插件, 尝试 apt 安装 docker-compose-v2..."
+  apt-get update -y && apt-get install -y docker-compose-v2
+fi
+
+# Docker Hub 拉镜像加速(国内网络): 配置镜像源
+if ! grep -q "registry-mirrors" /etc/docker/daemon.json 2>/dev/null; then
+  mkdir -p /etc/docker
+  cat > /etc/docker/daemon.json <<'EOF'
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.m.daocloud.io",
+    "https://dockerproxy.net"
+  ]
+}
+EOF
+  systemctl restart docker 2>/dev/null || true
+  echo "    已配置 Docker Hub 镜像加速"
 fi
 
 echo "==> [2/6] 准备目录与配置"

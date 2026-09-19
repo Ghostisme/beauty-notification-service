@@ -5,6 +5,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
+# pip 走阿里云源(国内服务器构建提速)
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    PIP_DEFAULT_TIMEOUT=60
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY sync.py web_admin.py storage.py ./
