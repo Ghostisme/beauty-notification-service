@@ -1,0 +1,16 @@
+[Unit]
+Description=Douyin Laikeli orders to WeCom group sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 按实际部署路径修改。这是"订单自动拉取"的裸机备用方案(推荐用 docker compose --profile sync)
+WorkingDirectory=/opt/dylk-wecom-sync
+Environment=STATE_DIR=/opt/dylk-wecom-sync/state
+ExecStart=/opt/dylk-wecom-sync/venv/bin/python sync.py --serve
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

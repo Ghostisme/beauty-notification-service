@@ -1,0 +1,80 @@
+{
+  "mode": "file",
+  "comment": "mode: 'api' = 服务商模式通过来客开放平台API逐商户拉单; 'file' = 读取本地导出的订单CSV/Excel",
+  "douyin": {
+    "comment": "来客开放平台服务商应用凭证 (partner.open-douyin.com, 商家在来客后台授权后可代调用)。也可用环境变量 DOUYIN_CLIENT_KEY / DOUYIN_CLIENT_SECRET 覆盖",
+    "client_key": "在此填入你的client_key",
+    "client_secret": "在此填入你的client_secret",
+    "comment_token": "client_token 获取接口, 一般无需修改",
+    "token_url": "https://open.douyin.com/oauth/client_token",
+    "comment_order": "订单查询接口(服务商模式), 对照官方文档确认: /goodlife/v1/akte/order/query/",
+    "order_query_path": "/goodlife/v1/akte/order/query/",
+    "page_size": 50,
+    "comment_phone": "phone_decrypt: 'local'=本地AES解密(需 pycryptodome, key=clientSecret); 'api'=官方批量解密接口; 'off'=不取手机号",
+    "phone_decrypt": "local",
+    "comment_account_id": "旧配置单商户兼容: 未配 merchants 时使用此 account_id",
+    "account_id": ""
+  },
+  "wecom": {
+    "comment": "默认企业微信推送配置(未在 merchants 单独覆盖时生效)",
+    "target": "internal",
+    "comment_webhook": "内部群机器人 Webhook。外部客户群不支持机器人, 走 corpid/chat_id_list 的企业群发",
+    "webhook_url": "在此填入企业微信群机器人Webhook地址",
+    "mention_mobile_list": [
+      "@all"
+    ],
+    "comment_mention": "@all 提醒所有人; 客户群群发不支持@提醒",
+    "corpid": "ww9f53651f397a9958",
+    "agentid": "1000002",
+    "secret": "在此填入自建应用的Secret",
+    "sender": "",
+    "comment_sender": "可选: 执行群发的成员userid(通常是群主), 留空则由应用自动分配",
+    "chat_id_list": []
+  },
+  "push": {
+    "comment": "默认推送样式(未在 merchants 单独覆盖时生效)。phone=客户手机号(需解密成功才有值)",
+    "template": "order",
+    "comment_template": "模板: 'order'=新订单提醒 / 'lead'=新线索提醒(含联系电话) / 'default'=旧版字段表样式; 汇总模式下自动变为对应汇总标题",
+    "per_order": false,
+    "max_orders_in_summary": 20,
+    "fields": [
+      "order_id",
+      "goods",
+      "amount",
+      "status",
+      "phone",
+      "customer",
+      "created_at",
+      "shop"
+    ]
+  },
+  "merchants": [
+    {
+      "comment": "每个来客商户一条; wecom/push 未填的字段继承上面的默认配置",
+      "account_id": "7605435122824890377",
+      "name": "超英皮肤定制管理",
+      "wecom": {
+        "webhook_url": "在此填入该商户对应的群机器人Webhook(仅内部群用, 外部客户群不用这里)",
+        "target": "internal"
+      }
+    },
+    {
+      "account_id": "7523898493467904038",
+      "name": "长沙市尹欣美容咨询有限公司"
+    },
+    {
+      "account_id": "7274898741256980495",
+      "name": "苏州一线美容有限公司"
+    }
+  ],
+  "sync": {
+    "comment": "API模式: 拉取最近N分钟内更新的订单; 去重记录按商户分文件存储 state_<account_id>.json",
+    "lookback_minutes": 60
+  },
+  "serve": {
+    "comment": "常驻服务模式(python sync.py --serve)配置: interval_minutes 轮询间隔; watch_dir 为导出文件监听目录; merchant 指定文件模式推给哪个商户(name或序号, 默认第一个)",
+    "interval_minutes": 30,
+    "watch_dir": "data/incoming",
+    "merchant": ""
+  }
+}

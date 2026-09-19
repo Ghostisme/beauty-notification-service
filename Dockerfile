@@ -1,37 +1,23 @@
-# 使用轻量级 Node.js 镜像
-FROM node:18-alpine
+# 后端 API 容器: web_admin.py 提供管理后台全部 /api
+# 前端静态页(web/)由宿主机全局 nginx 直接托管, 不打进镜像
+FROM python:3.12-slim
 
-# 设置工作目录
 WORKDIR /app
 
-# 设置时区为中国
-RUN apk add --no-cache tzdata && \
-    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    echo "Asia/Shanghai" > /etc/timezone && \
-    apk del tzdata
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制 package 文件
-COPY package*.json ./
+COPY sync.py web_admin.py storage.py ./
 
-# 安装生产依赖
-RUN npm ci --only=production && \
-    npm cache clean --force
+# 数据目录: 订单文件 / SQLite / 日志 / 去重状态(挂载卷持久化)
+RUN mkdir -p data/incoming data/processed state logs
 
-# 复制源代码
-COPY src/ ./src/
+# 时区改为北京时间, 保证订单时间/汇总标题正确
+ENV TZ=Asia/Shanghai \
+    ADMIN_HOST=0.0.0.0 \
+    ADMIN_PORT=8787 \
+    STATE_DIR=/app/state
 
-# 创建日志目录
-RUN mkdir -p /app/logs && chmod 777 /app/logs
+EXPOSE 8787
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"
-
-# 暴露端口
-EXPOSE 3000
-
-# 非 root 用户运行（安全考虑）
-USER node
-
-# 启动服务
-CMD ["node", "src/server.js"]
+CMD ["python", "web_admin.py"]

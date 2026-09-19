@@ -1,414 +1,485 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>美容店来客通知管理后台</title>
-
-  <!-- Bootstrap 5 CSS -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- Bootstrap Icons -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-  <!-- 自定义样式 -->
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抖音来客 → 企业微信 订单推送控制台</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #ffffff; --border: #e5e8ef;
+    --text: #1f2937; --muted: #6b7280; --brand: #2563eb; --brand-weak: #eff6ff;
+    --ok: #16a34a; --warn: #d97706; --danger: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+         background: var(--bg); color: var(--text); padding: 24px; }
+  .wrap { max-width: 1160px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 6px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .pipeline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .stage { background: var(--brand-weak); color: var(--brand); border: 1px solid #dbeafe;
+           border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; }
+  .stage span { font-weight: 400; }
+  .arrow { color: var(--muted); font-size: 16px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 2px solid var(--border); }
+  .tab { padding: 9px 18px; font-size: 14px; cursor: pointer; border: none; background: none;
+         color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -2px; font-weight: 500; }
+  .tab.active { color: var(--brand); border-bottom-color: var(--brand); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+          padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, select, textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px;
+        padding: 8px 10px; font-size: 13px; font-family: inherit; background: #fff; color: var(--text); }
+  textarea { min-height: 56px; resize: vertical; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #bfdbfe; border-color: var(--brand); }
+  .btn { border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+         background: var(--brand); color: #fff; font-weight: 500; }
+  .btn:hover { opacity: .9; }
+  .btn.ghost { background: #fff; color: var(--text); border: 1px solid var(--border); }
+  .btn.danger { background: #fff; color: var(--danger); border: 1px solid #fecaca; }
+  .btn.small { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .status { font-size: 12px; padding: 4px 10px; border-radius: 999px; display: inline-block; }
+  .status.ok { background: #dcfce7; color: var(--ok); }
+  .status.err { background: #fee2e2; color: var(--danger); }
+  .status.wait { background: #fef3c7; color: var(--warn); }
+  pre { background: #0f172a0d; border: 1px solid var(--border); border-radius: 8px;
+        padding: 12px; font-size: 12px; white-space: pre-wrap; word-break: break-all;
+        max-height: 340px; overflow: auto; font-family: Consolas, monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 7px 8px; text-align: left; }
+  th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+  td.wrap-cell { word-break: break-all; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+  .tag.ok { background: #dcfce7; color: var(--ok); }
+  .tag.err { background: #fee2e2; color: var(--danger); }
+  .tag.info { background: #dbeafe; color: var(--brand); }
+  .merchant { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #fafbfd; }
+  .merchant .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+  .merchant .head b { font-size: 14px; }
+  .hidden { display: none; }
+  .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: #fafbfd; }
+  .stat b { font-size: 20px; display: block; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+           background: #111827; color: #fff; padding: 10px 18px; border-radius: 8px;
+           font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 99; }
+  #toast.show { opacity: .95; }
+  #toast.err { background: var(--danger); }
+</style>
 </head>
 <body>
-  <!-- 顶部导航栏 -->
-  <nav class="navbar navbar-expand-lg navbar-dark bg-gradient sticky-top shadow">
-    <div class="container-fluid">
-      <a class="navbar-brand d-flex align-items-center" href="#">
-        <i class="bi bi-bell-fill me-2 fs-4"></i>
-        <span class="fw-bold">美容店来客通知系统</span>
-      </a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-        <ul class="navbar-nav align-items-center">
-          <li class="nav-item me-3">
-            <span class="badge rounded-pill" id="statusBadge">
-              <i class="bi bi-circle-fill me-1" id="statusIcon"></i>
-              <span id="statusText">检查中...</span>
-            </span>
-          </li>
-          <li class="nav-item">
-            <button class="btn btn-sm btn-outline-light" onclick="refreshDashboard()">
-              <i class="bi bi-arrow-clockwise"></i> 刷新
-            </button>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </nav>
+<div class="wrap">
+  <h1>抖音来客 → 企业微信 订单推送控制台</h1>
+  <div class="sub">商户管理 · 订单数据 · 日志追踪 ｜ 服务: <span id="host">notification.hongquanquan.cn</span></div>
 
-  <div class="container-fluid">
+  <div class="pipeline">
+    <span class="stage">📥 来客拉单<br><span>client_token + account_id</span></span>
+    <span class="arrow">→</span>
+    <span class="stage">🔐 手机号解密<br><span>AES / 官方接口</span></span>
+    <span class="arrow">→</span>
+    <span class="stage">✉️ 消息模板<br><span>汇总 / 单订单</span></span>
+    <span class="arrow">→</span>
+    <span class="stage">🚀 企微推送<br><span>内部群 / 客户群群发</span></span>
+    <span class="arrow">→</span>
+    <span class="stage">🧾 日志追踪<br><span>SQLite 落库</span></span>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="merchants" onclick="switchTab(this)">🏪 商户管理</button>
+    <button class="tab" data-tab="orders" onclick="switchTab(this)">📦 订单数据</button>
+    <button class="tab" data-tab="logs" onclick="switchTab(this)">🧾 运行日志</button>
+  </div>
+
+  <!-- 令牌 -->
+  <div class="card hidden" id="tokenCard">
     <div class="row">
-      <!-- 侧边栏 -->
-      <nav class="col-md-3 col-lg-2 d-md-block sidebar bg-light">
-        <div class="position-sticky pt-3">
-          <ul class="nav flex-column">
-            <li class="nav-item">
-              <a class="nav-link active" href="#" data-page="dashboard" onclick="switchPage(event, 'dashboard')">
-                <i class="bi bi-speedometer2 me-2"></i>
-                概览
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" href="#" data-page="shops" onclick="switchPage(event, 'shops')">
-                <i class="bi bi-shop me-2"></i>
-                店铺管理
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" href="#" data-page="logs" onclick="switchPage(event, 'logs')">
-                <i class="bi bi-journal-text me-2"></i>
-                消息日志
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" href="#" data-page="config" onclick="switchPage(event, 'config')">
-                <i class="bi bi-gear me-2"></i>
-                系统配置
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" href="#" data-page="webhook" onclick="switchPage(event, 'webhook')">
-                <i class="bi bi-link-45deg me-2"></i>
-                Webhook 测试
-              </a>
-            </li>
-          </ul>
-
-          <hr class="my-3">
-
-          <div class="px-3">
-            <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-              <span>快速链接</span>
-            </h6>
-            <ul class="nav flex-column mb-2">
-              <li class="nav-item">
-                <a class="nav-link text-muted" href="/api/health" target="_blank">
-                  <i class="bi bi-heart-pulse me-2"></i>
-                  健康检查
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link text-muted" href="/" target="_blank">
-                  <i class="bi bi-house me-2"></i>
-                  首页
-                </a>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </nav>
-
-      <!-- 主内容区 -->
-      <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
-        <!-- 概览页面 -->
-        <div id="dashboard" class="page-content">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-            <h1 class="h2"><i class="bi bi-speedometer2 me-2"></i>系统概览</h1>
-            <div class="btn-toolbar mb-2 mb-md-0">
-              <button class="btn btn-sm btn-outline-secondary" onclick="refreshDashboard()">
-                <i class="bi bi-arrow-clockwise"></i> 刷新数据
-              </button>
-            </div>
-          </div>
-
-          <!-- 统计卡片 -->
-          <div class="row g-3 mb-4">
-            <div class="col-xl-3 col-md-6">
-              <div class="card stats-card border-0 shadow-sm">
-                <div class="card-body">
-                  <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                      <div class="stats-icon bg-primary bg-gradient">
-                        <i class="bi bi-shop"></i>
-                      </div>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                      <h6 class="text-muted mb-1">已授权店铺</h6>
-                      <h3 class="mb-0" id="totalShops">-</h3>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="col-xl-3 col-md-6">
-              <div class="card stats-card border-0 shadow-sm">
-                <div class="card-body">
-                  <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                      <div class="stats-icon bg-success bg-gradient">
-                        <i class="bi bi-chat-dots"></i>
-                      </div>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                      <h6 class="text-muted mb-1">今日消息</h6>
-                      <h3 class="mb-0" id="todayMessages">-</h3>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="col-xl-3 col-md-6">
-              <div class="card stats-card border-0 shadow-sm">
-                <div class="card-body">
-                  <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                      <div class="stats-icon bg-info bg-gradient">
-                        <i class="bi bi-check-circle"></i>
-                      </div>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                      <h6 class="text-muted mb-1">推送成功率</h6>
-                      <h3 class="mb-0" id="successRate">-</h3>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="col-xl-3 col-md-6">
-              <div class="card stats-card border-0 shadow-sm">
-                <div class="card-body">
-                  <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                      <div class="stats-icon bg-warning bg-gradient">
-                        <i class="bi bi-people"></i>
-                      </div>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                      <h6 class="text-muted mb-1">累计客户</h6>
-                      <h3 class="mb-0" id="totalCustomers">-</h3>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 最近消息 -->
-          <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white py-3">
-              <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>最近消息</h5>
-            </div>
-            <div class="card-body">
-              <div id="recentMessages">
-                <div class="text-center py-5">
-                  <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">加载中...</span>
-                  </div>
-                  <p class="mt-2 text-muted">加载中...</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 店铺管理页面 -->
-        <div id="shops" class="page-content" style="display: none;">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-            <h1 class="h2"><i class="bi bi-shop me-2"></i>店铺管理</h1>
-            <div class="btn-toolbar mb-2 mb-md-0">
-              <button class="btn btn-primary" onclick="showAuthModal()">
-                <i class="bi bi-plus-circle me-1"></i> 授权新店铺
-              </button>
-            </div>
-          </div>
-
-          <div class="card border-0 shadow-sm">
-            <div class="card-body">
-              <div id="shopsList">
-                <div class="text-center py-5">
-                  <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">加载中...</span>
-                  </div>
-                  <p class="mt-2 text-muted">加载中...</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 消息日志页面 -->
-        <div id="logs" class="page-content" style="display: none;">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-            <h1 class="h2"><i class="bi bi-journal-text me-2"></i>消息日志</h1>
-            <div class="btn-toolbar mb-2 mb-md-0">
-              <div class="input-group input-group-sm me-2">
-                <select id="logShopFilter" class="form-select" onchange="loadLogs()">
-                  <option value="">全部店铺</option>
-                </select>
-              </div>
-              <button class="btn btn-sm btn-outline-secondary" onclick="loadLogs()">
-                <i class="bi bi-arrow-clockwise"></i> 刷新
-              </button>
-            </div>
-          </div>
-
-          <div class="card border-0 shadow-sm">
-            <div class="card-body">
-              <div id="logsList">
-                <div class="text-center py-5">
-                  <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">加载中...</span>
-                  </div>
-                  <p class="mt-2 text-muted">加载中...</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 系统配置页面 -->
-        <div id="config" class="page-content" style="display: none;">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-            <h1 class="h2"><i class="bi bi-gear me-2"></i>系统配置</h1>
-          </div>
-
-          <div class="row g-3">
-            <div class="col-lg-6">
-              <div class="card border-0 shadow-sm h-100">
-                <div class="card-header bg-white py-3">
-                  <h5 class="mb-0"><i class="bi bi-server me-2"></i>环境变量</h5>
-                </div>
-                <div class="card-body">
-                  <div id="envVars">
-                    <div class="text-center py-3">
-                      <div class="spinner-border text-primary spinner-border-sm" role="status">
-                        <span class="visually-hidden">加载中...</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="col-lg-6">
-              <div class="card border-0 shadow-sm h-100">
-                <div class="card-header bg-white py-3">
-                  <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Webhook 配置</h5>
-                </div>
-                <div class="card-body">
-                  <div class="mb-3">
-                    <label class="form-label fw-bold">抖音 Webhook 地址</label>
-                    <div class="input-group">
-                      <input type="text" id="webhookUrl" class="form-control" readonly>
-                      <button class="btn btn-outline-secondary" onclick="copyToClipboard('webhookUrl')">
-                        <i class="bi bi-clipboard"></i>
-                      </button>
-                    </div>
-                    <div class="form-text">POST 请求接收抖音来客消息推送</div>
-                  </div>
-                  <div class="mb-0">
-                    <label class="form-label fw-bold">授权回调地址</label>
-                    <div class="input-group">
-                      <input type="text" id="callbackUrl" class="form-control" readonly>
-                      <button class="btn btn-outline-secondary" onclick="copyToClipboard('callbackUrl')">
-                        <i class="bi bi-clipboard"></i>
-                      </button>
-                    </div>
-                    <div class="form-text">用户授权后的跳转地址</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Webhook 测试页面 -->
-        <div id="webhook" class="page-content" style="display: none;">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-            <h1 class="h2"><i class="bi bi-link-45deg me-2"></i>Webhook 测试</h1>
-          </div>
-
-          <div class="row">
-            <div class="col-lg-8">
-              <div class="card border-0 shadow-sm">
-                <div class="card-header bg-white py-3">
-                  <h5 class="mb-0"><i class="bi bi-send me-2"></i>发送测试消息</h5>
-                </div>
-                <div class="card-body">
-                  <form id="testForm" onsubmit="sendTestMessage(event)">
-                    <div class="mb-3">
-                      <label class="form-label">选择店铺 <span class="text-danger">*</span></label>
-                      <select id="testShopId" class="form-select" required>
-                        <option value="">请选择店铺...</option>
-                      </select>
-                    </div>
-
-                    <div class="mb-3">
-                      <label class="form-label">测试消息</label>
-                      <textarea id="testMessage" class="form-control" rows="4" placeholder="输入测试消息内容... (可选)"></textarea>
-                      <div class="form-text">留空则发送默认测试消息</div>
-                    </div>
-
-                    <button type="submit" class="btn btn-primary">
-                      <i class="bi bi-send me-1"></i> 发送测试
-                    </button>
-                  </form>
-
-                  <div id="testResult" class="mt-3"></div>
-                </div>
-              </div>
-            </div>
-
-            <div class="col-lg-4">
-              <div class="card border-0 shadow-sm bg-light">
-                <div class="card-body">
-                  <h6 class="card-title"><i class="bi bi-info-circle me-1"></i>使用说明</h6>
-                  <ul class="small mb-0">
-                    <li>选择已授权的店铺</li>
-                    <li>发送测试消息到企业微信群</li>
-                    <li>验证推送功能是否正常</li>
-                    <li>检查消息格式和内容</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </main>
-      </main>
+      <span class="muted">本站已开启访问保护，请输入访问令牌 (ADMIN_TOKEN)：</span>
+      <input id="tokenInput" type="password" style="width:240px" placeholder="访问令牌">
+      <button class="btn small" onclick="setToken()">确认</button>
     </div>
   </div>
 
-  <!-- 授权弹窗 -->
-  <div class="modal fade" id="authModal" tabindex="-1" aria-labelledby="authModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="authModalLabel">
-            <i class="bi bi-key me-2"></i>授权新店铺
-          </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+  <!-- TAB 商户管理 -->
+  <div id="tab-merchants">
+    <div class="card">
+      <h2>① 全局配置（来客凭证 + 推送默认值）
+        <span class="row"><button class="btn ghost small" onclick="testDouyin()">测试来客凭证</button><span id="douyin_status"></span></span>
+      </h2>
+      <div class="grid">
+        <div><label>client_key</label><input id="g_key"></div>
+        <div><label>client_secret</label><input id="g_secret" type="password"></div>
+        <div><label>默认推送目标 target</label>
+          <select id="g_target">
+            <option value="internal">internal（内部群 Webhook）</option>
+            <option value="customer_group">customer_group（外部客户群群发）</option>
+            <option value="both">both（两边都发）</option>
+          </select>
         </div>
-        <div class="modal-body">
-          <div class="alert alert-info" role="alert">
-            <i class="bi bi-info-circle me-2"></i>
-            请复制以下授权链接并在浏览器中打开
-          </div>
-          <div class="input-group mb-3">
-            <input type="text" id="authUrl" class="form-control" readonly>
-            <button class="btn btn-primary" onclick="copyToClipboard('authUrl')">
-              <i class="bi bi-clipboard"></i> 复制
-            </button>
-          </div>
-          <p class="text-muted small mb-0">
-            <i class="bi bi-arrow-return-left me-1"></i>授权后将自动跳转回系统
-          </p>
+        <div><label>增量拉单时间窗（分钟）</label><input id="g_lookback" type="number" min="1"></div>
+        <div><label>手机号解密策略</label>
+          <select id="g_phone">
+            <option value="local">local（本地 AES）</option>
+            <option value="api">api（官方解密接口）</option>
+            <option value="off">off（不取手机号）</option>
+          </select>
         </div>
+        <div><label>消息模式 per_order</label>
+          <select id="g_perorder">
+            <option value="false">false（汇总一条，推荐）</option>
+            <option value="true">true（每单一条）</option>
+          </select>
+        </div>
+        <div><label>默认内部群 Webhook URL</label><input id="g_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></div>
+        <div><label>企微企业ID corpid</label><input id="g_corpid"></div>
+        <div><label>企微应用 Secret</label><input id="g_wecom_secret" type="password"></div>
+        <div><label>展示字段（逗号分隔）</label><input id="g_fields"></div>
+        <div style="grid-column: 1 / -1;"><label>默认客户群 chat_id_list（逗号分隔）</label><textarea id="g_chats"></textarea></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" onclick="saveGlobal()">保存全局配置</button>
       </div>
     </div>
+
+    <div class="card">
+      <h2>② 商户（account_id + 各自企微配置）
+        <button class="btn small" onclick="addMerchant()">＋ 新增商户</button>
+      </h2>
+      <div class="muted" style="margin-bottom:10px">商家在抖音来客「店铺管理 → 第三方应用授权」授权后即可拉单。未填写的企微项继承全局默认。</div>
+      <div id="merchants"></div>
+    </div>
+
+    <div class="card">
+      <h2>③ 拉单预览 / 推送结果</h2>
+      <pre id="out">点商户卡上的「拉单预览」或「推送」，结果会显示在这里。</pre>
+    </div>
   </div>
 
-  <!-- Bootstrap JS Bundle -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <!-- 自定义 JS -->
-  <script src="app.js"></script>
+  <!-- TAB 订单数据 -->
+  <div id="tab-orders" class="hidden">
+    <div class="card">
+      <h2>📦 订单库（拉单/推送时自动落库，按 商户+订单号 幂等更新）
+        <button class="btn ghost small" onclick="loadOrders()">🔄 刷新</button>
+      </h2>
+      <div class="row" style="margin-bottom:10px">
+        <select id="o_merchant" style="width:220px" onchange="loadOrders()"><option value="">全部商户</option></select>
+        <input id="o_keyword" style="width:240px" placeholder="搜订单号/商品/手机号/客户" onkeydown="if(event.key==='Enter')loadOrders()">
+        <button class="btn small" onclick="loadOrders()">搜索</button>
+        <span class="muted" id="o_pager"></span>
+        <span class="row" style="margin-left:auto">
+          <button class="btn ghost small" id="o_prev" onclick="pageOrders(-1)">上一页</button>
+          <button class="btn ghost small" id="o_next" onclick="pageOrders(1)">下一页</button>
+        </span>
+      </div>
+      <div style="overflow-x:auto"><table id="ordersTable"><thead>
+        <tr><th>商户</th><th>订单号</th><th>商品</th><th>金额</th><th>状态</th><th>手机号</th><th>客户</th><th>下单时间</th><th>入库时间</th></tr>
+      </thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- TAB 运行日志 -->
+  <div id="tab-logs" class="hidden">
+    <div class="card">
+      <h2>🧾 运行日志（每次操作/推送/错误自动记录，手机号已脱敏）
+        <span class="row">
+          <button class="btn ghost small" onclick="loadStats()">📊 概览</button>
+          <button class="btn ghost small" onclick="loadLogs()">🔄 刷新</button>
+        </span>
+      </h2>
+      <div class="stat-cards" id="statCards"></div>
+      <div class="row" style="margin-bottom:10px">
+        <select id="l_merchant" style="width:200px" onchange="loadLogs()"><option value="">全部商户</option></select>
+        <select id="l_level" style="width:130px" onchange="loadLogs()">
+          <option value="">全部级别</option><option value="INFO">INFO</option><option value="ERROR">ERROR</option>
+        </select>
+        <input id="l_action" style="width:170px" placeholder="操作名(如 真实推送)" onkeydown="if(event.key==='Enter')loadLogs()">
+        <button class="btn small" onclick="loadLogs()">筛选</button>
+        <span class="muted" id="l_pager"></span>
+        <span class="row" style="margin-left:auto">
+          <button class="btn ghost small" onclick="pageLogs(-1)">上一页</button>
+          <button class="btn ghost small" onclick="pageLogs(1)">下一页</button>
+        </span>
+      </div>
+      <div style="overflow-x:auto"><table id="logsTable"><thead>
+        <tr><th>时间</th><th>级别</th><th>商户</th><th>操作</th><th>结果</th><th>详情</th></tr>
+      </thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+let CFG = null, token = localStorage.getItem('admin_token') || '';
+let ordersState = { page: 1 }, logsState = { page: 1 };
+
+const $ = id => document.getElementById(id);
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function toast(msg, isErr) {
+  const t = $('toast');
+  t.textContent = msg; t.className = 'show' + (isErr ? ' err' : '');
+  setTimeout(() => t.className = '', 2600);
+}
+function fmtAmt(v) { try { return '¥' + Number(String(v).replace(/[¥￥,]/g,'')).toFixed(2); } catch(e) { return v; } }
+
+async function api(path, body) {
+  const headers = {'Content-Type': 'application/json'};
+  if (token) headers['X-Admin-Token'] = token;
+  const opt = body ? {method:'POST', headers, body: JSON.stringify(body)} : {headers};
+  const r = await fetch(path, opt);
+  if (r.status === 401) {
+    $('tokenCard').classList.remove('hidden');
+    throw new Error('需要访问令牌');
+  }
+  const j = await r.json();
+  if (j.log) console.log(j.log);
+  return j;
+}
+function setToken() {
+  token = $('tokenInput').value.trim();
+  localStorage.setItem('admin_token', token);
+  $('tokenCard').classList.add('hidden');
+  load(); loadMerchantsOptions();
+  toast('令牌已保存到本机浏览器');
+}
+function show(j) {
+  let text = JSON.stringify(j, null, 2);
+  if (j.log) text = '— 运行日志 —\n' + j.log + '\n\n' + text;
+  $('out').textContent = text;
+  switchTab(document.querySelector('[data-tab="merchants"]'), true);
+}
+
+function switchTab(btn, silent) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === btn));
+  ['merchants','orders','logs'].forEach(k => $('tab-' + k).classList.toggle('hidden', k !== btn.dataset.tab));
+  if (!silent) {
+    if (btn.dataset.tab === 'orders') loadOrders();
+    if (btn.dataset.tab === 'logs') { loadLogs(); loadStats(); }
+  }
+}
+
+/* ---------- 全局配置 ---------- */
+function renderGlobal(c) {
+  $('g_key').value = c.douyin.client_key || '';
+  $('g_secret').value = c.douyin.client_secret || '';
+  $('g_target').value = (c.wecom.target || 'internal');
+  $('g_lookback').value = (c.sync && c.sync.lookback_minutes) || 60;
+  $('g_phone').value = (c.douyin.phone_decrypt || 'local');
+  $('g_perorder').value = String(!!(c.push && c.push.per_order));
+  $('g_webhook').value = c.wecom.webhook_url || '';
+  $('g_corpid').value = c.wecom.corpid || '';
+  $('g_wecom_secret').value = c.wecom.secret || '';
+  $('g_fields').value = (c.push.fields || []).join(',');
+  $('g_chats').value = (c.wecom.chat_id_list || []).join(',');
+}
+function collectGlobal() {
+  return {
+    mode: (CFG.mode || 'api'),
+    admin_token: CFG.admin_token || '',
+    douyin: { ...CFG.douyin,
+      client_key: $('g_key').value.trim(), client_secret: $('g_secret').value.trim(),
+      phone_decrypt: $('g_phone').value },
+    wecom: { ...CFG.wecom,
+      target: $('g_target').value, webhook_url: $('g_webhook').value.trim(),
+      corpid: $('g_corpid').value.trim(), secret: $('g_wecom_secret').value.trim(),
+      chat_id_list: $('g_chats').value.split(/[,\n]/).map(s => s.trim()).filter(Boolean) },
+    push: { ...CFG.push, per_order: $('g_perorder').value === 'true',
+      fields: $('g_fields').value.split(',').map(s => s.trim()).filter(Boolean) },
+    sync: { ...CFG.sync, lookback_minutes: parseInt($('g_lookback').value) || 60 },
+    serve: CFG.serve || {}, merchants: CFG.merchants || []
+  };
+}
+async function saveGlobal() {
+  CFG = collectGlobal();
+  const j = await api('/api/config/save', {config: CFG});
+  j.ok ? toast('全局配置已保存 ✔') : toast('保存失败: ' + j.error, true);
+  if (j.ok) load();
+}
+async function testDouyin() {
+  const j = await api('/api/test/douyin', {});
+  $('douyin_status').innerHTML = j.ok
+    ? '<span class="status ok">来客凭证有效 ✔</span>'
+    : '<span class="status err">失败: ' + esc(j.error) + '</span>';
+}
+
+/* ---------- 商户 ---------- */
+function merchantForm(m, i) {
+  const w = m.wecom || {};
+  return `
+  <div class="merchant" data-i="${i}">
+    <div class="head">
+      <b>🏪 ${esc(m.name || ('商户' + (i+1)))} <span class="muted">account_id: ${esc(m.account_id || '未填')}</span></b>
+      <span class="row">
+        <button class="btn ghost small" onclick="preview(${i})">🔍 拉单预览</button>
+        <button class="btn ghost small" onclick="pushMerchant(${i}, true)">🧪 推送测试</button>
+        <button class="btn small" onclick="pushMerchant(${i}, false)">🚀 推送</button>
+        <button class="btn ghost small" onclick="listGroups(${i})">👥 查客户群</button>
+      </span>
+    </div>
+    <div class="grid">
+      <div><label>商户名称</label><input class="m-name" value="${esc(m.name || '')}"></div>
+      <div><label>来客商户根账户ID account_id</label><input class="m-account" value="${esc(m.account_id || '')}"></div>
+      <div><label>推送 target（留空=继承全局）</label>
+        <select class="m-target"><option value="">继承全局</option>
+          <option value="internal"${w.target==='internal'?' selected':''}>internal</option>
+          <option value="customer_group"${w.target==='customer_group'?' selected':''}>customer_group</option>
+          <option value="both"${w.target==='both'?' selected':''}>both</option>
+        </select></div>
+      <div><label>该商户群 Webhook URL</label><input class="m-webhook" value="${esc(w.webhook_url || '')}"></div>
+      <div><label>企微 corpid（客户群用）</label><input class="m-corpid" value="${esc(w.corpid || '')}"></div>
+      <div><label>企微应用 Secret</label><input class="m-secret" type="password" value="${esc(w.secret || '')}"></div>
+      <div><label>群发执行成员 userid sender（可选）</label><input class="m-sender" value="${esc(w.sender || '')}"></div>
+      <div><label>客户群 chat_id_list（逗号分隔）</label><textarea class="m-chats">${esc((w.chat_id_list || []).join(','))}</textarea></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn small" onclick="saveMerchant(${i})">保存商户</button>
+      <button class="btn ghost small" onclick="testWecom(${i})">测试企微凭证</button>
+      <button class="btn danger small" onclick="delMerchant(${i})">删除</button>
+      <span id="m_status_${i}"></span>
+    </div>
+  </div>`;
+}
+function renderMerchants() {
+  $('merchants').innerHTML = (CFG.merchants || []).length
+    ? CFG.merchants.map(merchantForm).join('')
+    : '<div class="muted">还没有商户，点右上角「＋ 新增商户」。</div>';
+}
+function collectMerchant(i) {
+  const root = document.querySelector(`.merchant[data-i="${i}"]`);
+  const g = v => root.querySelector(v).value.trim();
+  const wecom = {};
+  if (g('.m-target')) wecom.target = g('.m-target');
+  if (g('.m-webhook')) wecom.webhook_url = g('.m-webhook');
+  if (g('.m-corpid')) wecom.corpid = g('.m-corpid');
+  if (g('.m-secret')) wecom.secret = g('.m-secret');
+  if (g('.m-sender')) wecom.sender = g('.m-sender');
+  const chats = g('.m-chats').split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+  if (chats.length) wecom.chat_id_list = chats;
+  return { name: g('.m-name'), account_id: g('.m-account'), wecom };
+}
+async function saveMerchant(i) {
+  const j = await api('/api/merchant/save', {index: i, merchant: collectMerchant(i)});
+  if (j.ok) { toast('商户已保存 ✔'); await load(); loadMerchantsOptions(); } else toast('保存失败: ' + j.error, true);
+}
+async function delMerchant(i) {
+  if (!confirm('确定删除该商户配置?')) return;
+  const j = await api('/api/merchant/delete', {index: i, merchant: {name: (CFG.merchants[i]||{}).name}});
+  if (j.ok) { toast('已删除'); await load(); loadMerchantsOptions(); } else toast('删除失败: ' + j.error, true);
+}
+async function addMerchant() {
+  const j = await api('/api/merchant/save', {merchant: {name: '新商户', account_id: '在此填入account_id'}});
+  if (j.ok) { await load(); loadMerchantsOptions(); } else toast('新增失败: ' + j.error, true);
+}
+function mSpec(i) { return CFG.merchants[i] && CFG.merchants[i].name ? CFG.merchants[i].name : String(i+1); }
+function setStatus(i, ok, text) { $('m_status_' + i).innerHTML = `<span class="status ${ok ? 'ok' : 'err'}">${text}</span>`; }
+async function preview(i) {
+  setStatus(i, true, '<span class="status wait">拉单中…</span>');
+  try {
+    const j = await api('/api/orders/preview?merchant=' + encodeURIComponent(mSpec(i))
+      + '&lookback_minutes=' + ($('g_lookback').value || 60));
+    show(j);
+    setStatus(i, j.ok, j.ok ? `<span class="status ok">拉到 ${j.data.total} 单 / ${j.data.messages.length} 条消息，已入库</span>` : '<span class="status err">失败</span>');
+  } catch(e) { setStatus(i, false, `<span class="status err">${esc(e.message)}</span>`); }
+}
+async function pushMerchant(i, dry) {
+  if (!dry && !confirm('确认真实推送到企业微信?')) return;
+  setStatus(i, true, '<span class="status wait">执行中…</span>');
+  try {
+    const j = await api('/api/push', {merchant: mSpec(i), dry_run: dry,
+      lookback_minutes: parseInt($('g_lookback').value) || null});
+    show(j);
+    setStatus(i, j.ok, j.ok ? `<span class="status ok">${dry ? '测试完成' : '推送完成'}（拉到 ${j.data.fetched} 单）</span>` : '<span class="status err">失败</span>');
+  } catch(e) { setStatus(i, false, `<span class="status err">${esc(e.message)}</span>`); }
+}
+async function listGroups(i) {
+  setStatus(i, true, '<span class="status wait">查询中…</span>');
+  try {
+    const j = await api('/api/wecom/groups?merchant=' + encodeURIComponent(mSpec(i)));
+    show(j);
+    if (j.ok) {
+      setStatus(i, true, `<span class="status ok">${j.data.groups.length} 个客户群</span>`);
+      const ids = j.data.groups.map(g => g.chat_id + '  ' + (g.name || '')).join('\n');
+      const pick = prompt('客户群列表（复制 chat_id）：\n' + ids + '\n\n把要用的 chat_id 粘贴到 chat_id_list 输入框后点保存。');
+      if (pick) document.querySelector(`.merchant[data-i="${i}"] .m-chats`).value = pick.trim();
+    } else setStatus(i, false, '<span class="status err">失败</span>');
+  } catch(e) { setStatus(i, false, `<span class="status err">${esc(e.message)}</span>`); }
+}
+async function testWecom(i) {
+  const j = await api('/api/test/wecom?merchant=' + encodeURIComponent(mSpec(i)));
+  toast(j.ok ? '企微凭证有效 ✔' : '企微凭证失败: ' + j.error, !j.ok);
+}
+
+/* ---------- 订单数据 ---------- */
+async function loadMerchantsOptions() {
+  const mk = sel => { sel.innerHTML = '<option value="">全部商户</option>' +
+    (CFG.merchants || []).map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join(''); };
+  mk($('o_merchant')); mk($('l_merchant'));
+}
+function orderRows(orders) {
+  return orders.map(o => `<tr>
+    <td>${esc(o.merchant_name)}</td><td class="wrap-cell">${esc(o.order_id)}</td>
+    <td class="wrap-cell">${esc(o.goods)}</td><td>${fmtAmt(o.amount)}</td>
+    <td>${esc(o.status)}</td><td>${esc(o.phone || '-')}</td><td>${esc(o.customer || '-')}</td>
+    <td>${esc(o.created_at || '-')}</td><td>${esc(o.fetched_at || '-')}</td></tr>`).join('');
+}
+async function loadOrders() {
+  ordersState.keyword = $('o_keyword').value.trim();
+  const p = new URLSearchParams({merchant: $('o_merchant').value, keyword: ordersState.keyword,
+    page: ordersState.page, page_size: 50});
+  const j = await api('/api/orders?' + p);
+  if (!j.ok) { toast('查询失败: ' + j.error, true); return; }
+  $('ordersTable tbody').innerHTML = j.data.orders.length ? orderRows(j.data.orders)
+    : '<tr><td colspan="9" class="muted">暂无订单数据 — 点「商户管理」页签的「拉单预览」/「推送」后自动入库。</td></tr>';
+  const totalPages = Math.max(1, Math.ceil(j.data.total / j.data.page_size));
+  $('o_pager').textContent = `共 ${j.data.total} 条 / 第 ${j.data.page}/${totalPages} 页`;
+}
+function pageOrders(d) { ordersState.page = Math.max(1, ordersState.page + d); loadOrders(); }
+
+/* ---------- 运行日志 ---------- */
+function logRows(logs) {
+  return logs.map(l => `<tr>
+    <td style="white-space:nowrap">${esc(l.ts)}</td>
+    <td><span class="tag ${l.ok ? 'ok' : 'err'}">${esc(l.level)}</span></td>
+    <td>${esc(l.merchant || '-')}</td><td>${esc(l.action)}</td>
+    <td>${l.ok ? '✅ 成功' : '❌ 失败'}</td><td class="wrap-cell" style="max-width:380px">${esc(l.detail)}</td></tr>`).join('');
+}
+async function loadLogs() {
+  logsState.action = $('l_action').value.trim();
+  const p = new URLSearchParams({merchant: $('l_merchant').value, level: $('l_level').value,
+    action: logsState.action, page: logsState.page, page_size: 50});
+  const j = await api('/api/logs?' + p);
+  if (!j.ok) { toast('查询失败: ' + j.error, true); return; }
+  $('logsTable tbody').innerHTML = j.data.logs.length ? logRows(j.data.logs)
+    : '<tr><td colspan="6" class="muted">暂无日志。</td></tr>';
+  const totalPages = Math.max(1, Math.ceil(j.data.total / j.data.page_size));
+  $('l_pager').textContent = `共 ${j.data.total} 条 / 第 ${j.data.page}/${totalPages} 页`;
+}
+function pageLogs(d) { logsState.page = Math.max(1, logsState.page + d); loadLogs(); }
+async function loadStats() {
+  const j = await api('/api/stats');
+  if (!j.ok) return;
+  const d = j.data;
+  $('statCards').innerHTML = `
+    <div class="stat"><b>${(d.orders_by_merchant || []).reduce((s, x) => s + x.n, 0)}</b><span>订单库总量</span></div>
+    ${(d.orders_by_merchant || []).map(x => `<div class="stat"><b>${x.n}</b><span>${esc(x.merchant_name || x.account_id)}</span></div>`).join('')}
+    <div class="stat"><b>${d.logs_today}</b><span>今日操作</span></div>
+    <div class="stat"><b style="color:${d.errors_today ? 'var(--danger)' : 'inherit'}">${d.errors_today}</b><span>今日错误</span></div>`;
+}
+
+/* ---------- init ---------- */
+async function load() {
+  const j = await api('/api/config');
+  if (!j.ok) { toast('加载配置失败: ' + j.error, true); return; }
+  CFG = j.data.config;
+  renderGlobal(CFG);
+  renderMerchants();
+  loadMerchantsOptions();
+}
+load().catch(e => {});
+</script>
 </body>
 </html>

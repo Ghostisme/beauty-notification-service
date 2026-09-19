@@ -1,230 +1,153 @@
-# 美容店来客通知系统
+# 抖音来客订单 → 企业微信群 同步工具
 
-> 将抖音生活服务店铺的来客消息实时推送到企业微信客户群
+把抖音来客的订单信息推送到企业微信群（内部群走群机器人 Webhook，外部客户群走企业群发 API）。支持**服务商模式**：一个应用服务多个来客商户，逐商户拉单推送，并解密订单中的客户手机号。
 
-## 📖 项目简介
+## 推送目标
 
-本系统用于接收抖音生活服务平台的订单和客户消息,并自动推送到对应的企业微信外部客户群,帮助店铺及时响应客户需求。
+| 目标 | 通道 | 说明 |
+|------|------|------|
+| 内部群 | 群机器人 Webhook | 简单可靠，无需申请权限 |
+| **外部客户群**（含微信用户） | 客户联系·企业群发 API | 群机器人**不支持**外部群，需自建应用 |
 
-### 核心功能
+`config.json` 中 `wecom.target` 三选一：`internal` / `customer_group` / `both`（两边都发）。每个商户可在 `merchants[].wecom` 单独覆盖。
 
-- ✅ **抖音 Webhook 接收**: 实时接收抖音平台推送的消息
-- ✅ **店铺多账号管理**: 支持多个抖音店铺接入
-- ✅ **企微群推送**: 自动推送到对应的企业微信客户群
-- ✅ **管理后台**: 可视化管理界面
-- ✅ **消息日志**: 完整的消息记录和推送状态
-- ✅ **Token 自动刷新**: 自动维护授权状态
+## 两种数据来源
 
-## 🎯 系统架构
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| `file` | 读取来客后台导出的订单 CSV/Excel | 快速上手，无需申请API权限 |
+| `api`  | 服务商模式：client_token + account_id 逐商户拉单 | 全自动，多商户 |
 
+## 快速开始（file 模式，5分钟跑通）
+
+1. 企业微信群里添加机器人：**群设置 → 群机器人 → 添加**，复制 Webhook 地址
+2. 打开 `config.json`，把地址填到 `wecom.webhook_url`
+3. 从抖音来客后台（订单管理 → 导出）下载订单表格
+4. 运行：
+   ```bash
+   python sync.py --file 你的订单文件.csv          # 真实发送
+   python sync.py --file 你的订单文件.csv --dry-run # 先预览不发送
+   ```
+
+## 服务商模式（多商户 + API 拉单 + 手机号）
+
+### 前置条件
+
+1. 在 [抖音开放平台服务商平台](https://partner.open-douyin.com) 创建**生活服务商应用**，拿到 `client_key` / `client_secret`
+2. 控制台「解决方案」申请行业方案与能力权限（至少包含**订单查询** `life.capacity.order.query`）
+3. **商家授权**：每个商户在抖音来客「店铺管理 → 第三方应用授权」授权你的应用；你在服务商平台「授权管理」确认授权关系
+4. 拿到每个商户的**来客商户根账户ID（account_id）**
+
+### 配置（config.json）
+
+```jsonc
+{
+  "mode": "api",
+  "douyin": {
+    "client_key": "...", "client_secret": "...",
+    "phone_decrypt": "local"
+  },
+  "merchants": [
+    { "account_id": "商户1根账户ID", "name": "门店A",
+      "wecom": { "webhook_url": "门店A的群Webhook" } },
+    { "account_id": "商户2根账户ID", "name": "门店B" }
+  ]
+}
 ```
-┌─────────────┐        ┌─────────────┐        ┌─────────────┐
-│   抖音店铺   │───────>│  本系统      │───────>│  企微客户群  │
-│  (订单消息)  │ Webhook│  (转发处理)  │  推送  │  (通知店员)  │
-└─────────────┘        └─────────────┘        └─────────────┘
-```
 
-## 🚀 快速开始
+- 订单接口：`GET /goodlife/v1/akte/order/query/`（按 `update_order_start_time/end_time` 增量拉取，`sync.lookback_minutes` 控制时间窗）
+- 每个商户独立去重（`state_<account_id>.json`），互不干扰
+- 推送时逐商户执行：`python sync.py --api`（全部商户）或 `--merchant 门店A`（指定商户）
 
-查看 [快速部署指南](./QUICK_START.md) 了解详细部署步骤。
+### 客户手机号
 
-### 最小化部署
+- 订单接口返回的购买人手机号是 **AES 加密密文**（平台隐私管控），脚本在订单原始结构中递归识别加密字段并解密
+- **本地解密**（默认，`phone_decrypt: "local"`）：AES-256-CBC，key = clientSecret 补齐/裁剪至 32 字节（补位字符 `#`，左右交替补齐），IV = key 前 16 字节；需 `pip install pycryptodome`
+- **官方接口解密**（`"api"`）：回退调用 `/goodlife/v1/open/common_biz/crypto/decrypt/batch/`；本地解密失败（缺依赖或解密异常）也会自动走此通道
+- 手机号解出后填入订单 `phone` 字段，在消息中显示为「手机号」/「📱」（`push.fields` 中含 `phone` 即展示）
+- 解密失败不影响订单推送，手机号留空并打印日志
+- 合规提醒：手机号属个人敏感信息，仅可用于核销/履约/售后等约定场景，注意个人信息保护义务
+
+### 平台限制
+
+- 接口/字段命名以官方文档为准，脚本已做常见字段兼容映射；若返回结构与预设不符，调整 `sync.py` 的 `map_api_order` / `PHONE_ENCRYPT_KEYS`
+- 订单查询接口需申请权限并完成商家授权，未授权商户调用会返回权限错误
+
+## 本地管理后台（Web 页面）
+
+不想改 config.json 的话，用管理后台：页面即可完成「填商户 account_id + 企微配置 → 拉单预览 → 推送」全流程。
 
 ```bash
-# 1. 克隆代码
-git clone <your-repo-url>
-cd beauty-notification-service
-
-# 2. 安装依赖
-npm install
-
-# 3. 配置环境变量
-cp .env.example .env
-# 编辑 .env 填入配置
-
-# 4. 创建数据库
-mysql -u root -p
-CREATE DATABASE beauty_notification CHARACTER SET utf8mb4;
-
-# 5. 启动服务
-npm start
+python web_admin.py          # 浏览器打开 http://127.0.0.1:8787
+ADMIN_PORT=9000 python web_admin.py   # 自定义端口
 ```
 
-## 📱 管理后台
+功能：
+- **商户管理**：新增/编辑/删除商户（account_id + 名称 + 各自企微配置，未填项继承全局）；全局来客凭证与推送默认值可配置、可测试
+- **订单数据**：拉单/推送时订单自动落库（SQLite，按 商户+订单号 幂等更新），支持按商户/关键词搜索、分页浏览
+- **运行日志**：每次操作（拉单预览/推送/配置修改/各类错误）自动记录，手机号脱敏，可按商户/级别/操作筛选，错误含官方 logid 便于向平台反馈追踪
+- **拉单预览**：调订单接口 → 解密手机号 → 生成消息模板，只看不发、不写去重状态
+- **推送测试 / 推送**：测试模式只打印消息；真实推送走去重后发送
+- **查客户群**：列出企微客户群 chat_id 和群名，选中的直接填入该商户配置
 
-访问 `http://your-domain:3000/admin/dashboard/` 进入管理后台
+安全：
+- 仅设置 `ADMIN_TOKEN`（环境变量或 config.json 的 `admin_token`）后，所有 API 需携带令牌，页面会提示输入；公网部署时**必须**设置
+- 服务器部署（nginx + systemd，配合已解析域名）见 `DEPLOY.md`
+- 注意：来客订单接口要求 **IP 白名单**，需在开放平台控制台添加服务器出口 IP，否则报 `2119013`
 
-### 主要功能
+链路：`抖音来客拉单 → 手机号解密 → 消息模板 → 企微内部群/外部客户群推送`。
 
-1. **系统概览**: 实时统计和最近消息
-2. **店铺管理**: 授权和配置店铺
-3. **消息日志**: 查看历史推送记录
-4. **系统配置**: 环境变量和 Webhook 地址
-5. **Webhook 测试**: 测试推送功能
+安全说明：服务仅监听 `127.0.0.1`（本机访问）；config.json 中含密钥，不要提交到公开仓库；也可用环境变量 `DOUYIN_CLIENT_KEY` / `DOUYIN_CLIENT_SECRET` 覆盖来客凭证（优先级高于配置文件）。
 
-## 🛠️ 技术栈
+## 推送外部客户群（企业群发）
 
-- **后端**: Node.js + Express
-- **数据库**: MySQL
-- **前端**: 原生 HTML + CSS + JavaScript
-- **API 集成**: 抖音开放平台 + 企业微信 API
+> 背景：企业微信**外部群（客户群）不支持添加群机器人**，Webhook 走不通。
+> 官方合规路径是「客户联系 → 企业群发」API，需要自建应用。
 
-## 📂 项目结构
+### 配置步骤
 
-```
-beauty-notification-service/
-├── src/
-│   ├── server.js              # 主服务器入口
-│   ├── config/
-│   │   └── index.js           # 配置管理
-│   ├── database/
-│   │   └── index.js           # 数据库操作
-│   ├── services/
-│   │   ├── douyin.js          # 抖音 API 服务
-│   │   └── wework.js          # 企微 API 服务
-│   ├── routes/
-│   │   └── index.js           # 路由处理
-│   └── utils/
-│       ├── logger.js          # 日志工具
-│       └── douyin-signature.js # 签名验证
-├── web/
-│   ├── index.html             # 管理后台页面
-│   ├── style.css              # 样式文件
-│   └── app.js                 # 前端逻辑
-├── .env.example               # 环境变量模板
-├── package.json               # 项目依赖
-├── QUICK_START.md             # 快速部署指南
-└── README.md                  # 项目说明
-```
+1. 企业微信管理后台 → **应用管理 → 自建应用 → 创建应用**，记下 `Secret`；「我的企业 → 企业信息」复制 **企业ID（corpid）**
+2. 应用详情页确认应用有**客户联系**权限，且**应用可见范围**包含目标客户群的群主
+3. 把 `corpid`、`secret` 填入 `config.json`（全局 `wecom` 或商户级 `merchants[].wecom`），`target` 改为 `customer_group`（或 `both` 同时推内部群）
+4. 查询客户群 ID 并填入 `chat_id_list`：
+   ```bash
+   python sync.py --list-groups                  # 默认商户
+   python sync.py --list-groups --merchant 门店A  # 指定商户
+   ```
+5. 试运行：`python sync.py --api --dry-run`
 
-## 🔌 API 接口
+### 平台硬限制（代码无法绕过，务必知晓）
 
-### 健康检查
-```
-GET /api/health
-```
+| 限制 | 说明 |
+|------|------|
+| **需成员确认** | API 只是创建群发任务，群主会在手机端「群发助手」收到待办，**手动点击发送**后才真正发到客户群 |
+| **频次限制** | 每个客户群每天默认只能接收 1 条群发（管理员可在群发助手调整规则：每天1条/每周7条/每月天数） |
+| **不支持 Markdown/@** | 群发消息为纯文本，脚本会自动把 Markdown 转为纯文本，@提醒在客户群不生效 |
+| **消息条数** | 受频次限制，客户群建议用汇总模式（`push.per_order: false`），每天最多发一条 |
 
-### 抖音 Webhook 回调
-```
-POST /api/douyin/webhook
-```
+## 常用参数
 
-### 店铺授权回调
-```
-GET /api/douyin/callback
-```
+| 参数 | 作用 |
+|------|------|
+| `--file <路径>` | 指定订单 CSV/Excel 文件 |
+| `--api` | 强制 API 模式（逐商户拉单） |
+| `--dry-run` | 只打印消息内容，不发送（测试用） |
+| `--all` | 忽略去重记录，全部重新推送 |
+| `--serve` | 常驻服务模式（定时执行） |
+| `--merchant <name/序号>` | 多商户时指定商户 |
+| `--list-groups` | 列出企业微信客户群（chat_id/群名） |
 
-### 店铺管理
-```
-GET  /api/admin/shops                        # 获取店铺列表
-POST /api/admin/shops/:shopId/wework-chat    # 配置企微群
-```
+## 配置说明（config.json）
 
-### 消息日志
-```
-GET /api/admin/logs                          # 获取消息日志
-GET /api/admin/statistics                    # 获取统计数据
-```
+- `merchants[]`：多商户列表，每项 `account_id` + `name`，可覆盖 `wecom`/`push`；未配 `merchants` 时兼容旧的单商户配置（`douyin.account_id`）
+- `douyin.phone_decrypt`：手机号解密策略 `local` / `api` / `off`
+- `push.fields`：消息里展示哪些字段（订单号/商品/金额/状态/客户/**手机号**/时间/门店）
+- `push.per_order`：`true` 每笔订单单独一条消息（实时感强）；`false` 汇总成一条（推荐订单多时）
+- `sync.lookback_minutes`：API 模式每次拉取最近 N 分钟的订单
+- 去重记录按商户分文件存储，同一订单不会重复推送
 
-### 测试接口
-```
-POST /api/test/push                          # 测试推送消息
-```
+## 注意事项
 
-## 🔐 环境变量说明
-
-| 变量名 | 说明 | 必填 |
-|--------|------|------|
-| `DOUYIN_CLIENT_KEY` | 抖音应用 Key | ✅ |
-| `DOUYIN_CLIENT_SECRET` | 抖音应用 Secret | ✅ |
-| `DOUYIN_SPI_TOKEN` | Webhook 验证 Token | ✅ |
-| `WEWORK_CORP_ID` | 企业微信企业 ID | ✅ |
-| `WEWORK_AGENT_ID` | 企业微信应用 ID | ✅ |
-| `WEWORK_SECRET` | 企业微信应用 Secret | ✅ |
-| `WEWORK_SENDER_USERID` | 发送者 UserID | ✅ |
-| `DB_HOST` | 数据库主机 | ✅ |
-| `DB_PORT` | 数据库端口 | ❌ |
-| `DB_USER` | 数据库用户名 | ✅ |
-| `DB_PASSWORD` | 数据库密码 | ✅ |
-| `DB_NAME` | 数据库名称 | ✅ |
-| `PORT` | 服务端口 | ❌ |
-| `NODE_ENV` | 运行环境 | ❌ |
-
-## 📝 开发指南
-
-### 本地开发
-
-```bash
-# 安装依赖
-npm install
-
-# 启动开发服务器(带热重载)
-npm run dev
-
-# 查看日志
-tail -f logs/app.log
-```
-
-### 代码规范
-
-- 使用 ES6+ 语法
-- 函数和类添加 JSDoc 注释
-- 错误处理使用 try-catch
-- 日志使用统一的 logger 模块
-
-## 🧪 测试
-
-### 测试 Webhook
-
-```bash
-curl -X POST http://localhost:3000/api/douyin/webhook \
-  -H "Content-Type: application/json" \
-  -H "X-Douyin-Signature: your-signature" \
-  -d '{"type":"order_new","data":{"shop_id":"123"}}'
-```
-
-### 测试推送
-
-在管理后台的 "Webhook 测试" 页面进行可视化测试。
-
-## 🐛 故障排查
-
-### 常见问题
-
-1. **数据库连接失败**
-   - 检查 MySQL 是否运行
-   - 验证数据库配置是否正确
-   - 确认数据库已创建
-
-2. **Webhook 接收不到消息**
-   - 确认服务器可公网访问
-   - 检查 HTTPS 配置
-   - 验证签名 Token 配置
-
-3. **企微推送失败**
-   - 检查 CorpID 和 Secret 是否正确
-   - 确认发送者在应用可见范围
-   - 验证 Chat ID 是否正确
-
-### 日志查看
-
-```bash
-# 应用日志
-tail -f logs/app.log
-
-# PM2 日志
-pm2 logs beauty-notification
-```
-
-## 📄 许可证
-
-MIT License
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request!
-
-## 📞 联系方式
-
-- Issues: <your-repo-url>/issues
-- 文档: [快速部署指南](./QUICK_START.md)
+- 企业微信机器人限频 **每分钟 20 条**，脚本已内置间隔，订单量大建议用汇总模式
+- 导出表格的列名如果和预设不一致（如"实付金额"写成了"支付额"），把新列名加进 `sync.py` 顶部的 `COLUMN_ALIASES` 即可
+- API 模式的接口字段以来客开放平台文档为准，脚本已做常见字段名的兼容映射

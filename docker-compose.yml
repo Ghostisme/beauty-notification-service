@@ -1,81 +1,43 @@
-version: '3.8'
-
+# 后端 API 容器(前端由宿主机全局 nginx 静态托管, /api 反代到 127.0.0.1:8787)
+# 启动: ADMIN_TOKEN=$(openssl rand -hex 24) docker compose up -d --build
 services:
-  # 主服务
-  notification-service:
+  dylk-admin:
     build: .
-    container_name: beauty-notification
+    container_name: dylk-admin
     restart: unless-stopped
+    # 只绑本机回环, 公网访问一律经 nginx, 不直接暴露 8787
     ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - TZ=Asia/Shanghai
-      - LOG_LEVEL=info
-      # 从 .env 文件加载抖音密钥
-      - DOUYIN_APP_ID=${DOUYIN_APP_ID}
-      - DOUYIN_APP_SECRET=${DOUYIN_APP_SECRET}
-    env_file:
-      - .env
+      - "127.0.0.1:8787:8787"
     volumes:
-      # 只读挂载配置文件
-      - ./data:/app/data:ro
-      # 日志持久化
+      # 配置与前端不在镜像里, 跟宿主机保持一致, 改完重启容器即生效
+      - ./config.json:/app/config.json
+      - ./data:/app/data
+      - ./state:/app/state
       - ./logs:/app/logs
-    networks:
-      - app-network
-    # 资源限制（适配 2GB 内存服务器）
-    deploy:
-      resources:
-        limits:
-          cpus: '0.8'      # 限制使用 80% CPU
-          memory: 1G       # 限制 1GB 内存
-        reservations:
-          cpus: '0.2'
-          memory: 256M
-    # 日志限制（防止日志文件过大）
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    environment:
+      - TZ=Asia/Shanghai
+      - ADMIN_HOST=0.0.0.0
+      - ADMIN_PORT=8787
+      - STATE_DIR=/app/state
+      # 公网部署必填: docker compose 启动前在 shell 里 export ADMIN_TOKEN=xxx
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?请在环境变量中设置 ADMIN_TOKEN}
+      # 来客凭证也可走环境变量(优先于 config.json)
+      # - DOUYIN_CLIENT_KEY=xxx
+      # - DOUYIN_CLIENT_SECRET=xxx
 
-  # Redis（消息队列，可选但推荐）
-  redis:
-    image: redis:7-alpine
-    container_name: beauty-redis
+  # 可选: 订单自动拉取常驻服务(默认不启动)
+  # 启动: docker compose --profile sync up -d
+  dylk-sync:
+    build: .
+    container_name: dylk-sync
     restart: unless-stopped
-    command: >
-      redis-server
-      --appendonly yes
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --save 900 1
-      --save 300 10
+    profiles: ["sync"]
+    command: ["python", "sync.py", "--serve"]
     volumes:
-      - redis-data:/data
-    networks:
-      - app-network
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "2"
-
-networks:
-  app-network:
-    driver: bridge
-
-volumes:
-  redis-data:
-    driver: local
+      - ./config.json:/app/config.json
+      - ./data:/app/data
+      - ./state:/app/state
+      - ./logs:/app/logs
+    environment:
+      - TZ=Asia/Shanghai
+      - STATE_DIR=/app/state

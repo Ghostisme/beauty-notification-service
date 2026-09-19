@@ -1,105 +1,115 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# 一键部署脚本 (Ubuntu 24.04, 全局 nginx + Docker 后端)
+# 用法: 在服务器上项目目录内执行  sudo bash deploy.sh
+#       可选: HTTPS=1 sudo bash deploy.sh   (同时用 certbot 配证书)
+set -euo pipefail
 
-# 一键部署脚本
-# 用于在全新的 Ubuntu 服务器上快速部署系统
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+DOMAIN="notification.hongquanquan.cn"
+PORT=8787
+REPO="https://github.com/Ghostisme/beauty-notification-service.git"
+OLD_DIR="/var/www/beauty-notification"
 
-set -e  # 遇到错误立即退出
+echo "==> [0/6] 清理旧服务(pm2 nodejs)"
+if command -v pm2 >/dev/null 2>&1; then
+  pm2 delete all >/dev/null 2>&1 || true
+  pm2 save --force >/dev/null 2>&1 || true
+  pm2 kill >/dev/null 2>&1 || true
+  echo "    pm2 服务已停止并清除"
+else
+  echo "    未安装 pm2, 跳过"
+fi
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🚀 美容店来客通知系统 - 一键部署脚本"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
+echo "==> [0.5/6] 同步代码(git)"
+if [ "$APP_DIR" != "/opt/beauty-notification-service" ]; then
+  if [ -d /opt/beauty-notification-service/.git ]; then
+    git -C /opt/beauty-notification-service pull --ff-only || true
+    APP_DIR=/opt/beauty-notification-service
+  elif [ "$APP_DIR" = "$OLD_DIR" ] || [ ! -d "$APP_DIR/.git" ]; then
+    git clone "$REPO" /opt/beauty-notification-service
+    APP_DIR=/opt/beauty-notification-service
+  fi
+fi
+cd "$APP_DIR"
 
-# 检查是否为 root 用户
-if [ "$EUID" -ne 0 ]; then
-  echo "❌ 请使用 root 用户运行此脚本"
+echo "==> [1/6] 检查 Docker"
+if ! command -v docker >/dev/null 2>&1; then
+  echo "    未安装 Docker, 正在安装..."
+  curl -fsSL https://get.docker.com | bash
+  systemctl enable --now docker
+fi
+if ! docker compose version >/dev/null 2>&1; then
+  echo "    缺少 docker compose 插件, 请确认 Docker 已正确安装"
   exit 1
 fi
 
-# 读取配置
-read -p "请输入你的域名(例如: example.com): " DOMAIN
-read -p "请输入数据库密码: " -s DB_PASSWORD
-echo ""
+echo "==> [2/6] 准备目录与配置"
+mkdir -p data/incoming data/processed state logs web
+if [ ! -f config.json ]; then
+  cp config.json.example config.json
+  echo "    config.json 不存在, 已从 config.json.example 创建(密钥留空, 可之后在管理后台页面填写)"
+fi
+chmod 600 config.json || true
 
-echo "📦 步骤 1/8: 更新系统..."
-apt-get update -qq
-apt-get upgrade -y -qq
+echo "==> [3/6] ADMIN_TOKEN"
+if [ -z "${ADMIN_TOKEN:-}" ]; then
+  if [ -f .admin_token ]; then
+    ADMIN_TOKEN="$(cat .admin_token)"
+  else
+    ADMIN_TOKEN="$(openssl rand -hex 24)"
+    printf '%s' "$ADMIN_TOKEN" > .admin_token
+    chmod 600 .admin_token
+  fi
+fi
+export ADMIN_TOKEN
+echo "    ADMIN_TOKEN = $ADMIN_TOKEN"
+echo "    (已保存到 $APP_DIR/.admin_token, 管理后台页面输入它登录)"
 
-echo "📦 步骤 2/8: 安装 Node.js..."
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
+echo "==> [4/6] 构建并启动后端容器"
+docker compose up -d --build
 
-echo "📦 步骤 3/8: 安装 MySQL..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server
-systemctl start mysql
-systemctl enable mysql
-
-echo "📦 步骤 4/8: 配置数据库..."
-mysql -e "CREATE DATABASE IF NOT EXISTS beauty_notification CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -e "CREATE USER IF NOT EXISTS 'beauty_user'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
-mysql -e "GRANT ALL PRIVILEGES ON beauty_notification.* TO 'beauty_user'@'localhost';"
-mysql -e "FLUSH PRIVILEGES;"
-
-echo "📦 步骤 5/8: 安装 PM2..."
-npm install -g pm2
-
-echo "📦 步骤 6/8: 安装 Nginx..."
-apt-get install -y nginx
-systemctl start nginx
-systemctl enable nginx
-
-echo "📦 步骤 7/8: 申请 SSL 证书..."
-apt-get install -y certbot python3-certbot-nginx
-certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --register-unsafely-without-email
-
-echo "📦 步骤 8/8: 配置 Nginx..."
-cat > /etc/nginx/sites-available/beauty-notification <<EOF
+echo "==> [5/6] 配置全局 nginx (静态前端 + /api 反代)"
+cat > /etc/nginx/sites-available/$DOMAIN <<EOF
 server {
     listen 80;
-    server_name ${DOMAIN};
-    return 301 https://\$server_name\$request_uri;
-}
+    server_name $DOMAIN;
 
-server {
-    listen 443 ssl http2;
-    server_name ${DOMAIN};
+    root $APP_DIR/web;
+    index index.html;
 
-    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
+    location /api/ {
+        proxy_pass http://127.0.0.1:$PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
+        proxy_read_timeout 120s;
     }
 }
 EOF
+ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
+nginx -t && systemctl reload nginx
 
-ln -sf /etc/nginx/sites-available/beauty-notification /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-nginx -t
-systemctl reload nginx
+echo "==> [6/6] 自检"
+sleep 2
+echo -n "  服务器出口IP(应 47.103.32.12): "; curl -s ifconfig.me || true; echo
+echo -n "  后端健康: "; curl -s http://127.0.0.1:$PORT/api/health || echo FAIL; echo
+echo -n "  页面: "; curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/ 2>/dev/null || \
+       curl -s -o /dev/null -w "%{http_code}" http://localhost/ ; echo
 
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✅ 服务器环境部署完成!"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "📋 下一步:"
-echo "1. 上传项目代码到 /opt/beauty-notification-service"
-echo "2. 配置 .env 文件"
-echo "3. 运行: cd /opt/beauty-notification-service && npm install"
-echo "4. 运行: pm2 start src/server.js --name beauty-notification"
-echo ""
-echo "🌐 你的域名: https://${DOMAIN}"
-echo "💾 数据库已创建: beauty_notification"
-echo "👤 数据库用户: beauty_user"
-echo ""
+if [ "${HTTPS:-0}" = "1" ]; then
+  echo "==> 配置 HTTPS (certbot)"
+  apt-get update -y && apt-get install -y certbot python3-certbot-nginx
+  certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m admin@hongquanquan.cn || \
+    echo "    certbot 失败, 确认域名已解析到本机后重试: certbot --nginx -d $DOMAIN"
+fi
+
+cat <<EOF
+
+============================================================
+ 部署完成
+  访问:  http(或https)://$DOMAIN   登录令牌见 .admin_token
+  后续改配置: 编辑 config.json -> docker compose restart
+  查看日志:   docker compose logs -f
+  拿到企微 Secret 后: 打开页面 -> 全局配置填入 secret 保存,
+             或直接编辑 config.json 的 wecom.secret 后重启
+============================================================
+EOF
