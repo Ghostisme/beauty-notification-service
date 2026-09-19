@@ -11,6 +11,7 @@ services:
     volumes:
       # 配置与前端不在镜像里, 跟宿主机保持一致, 改完重启容器即生效
       - ./config.json:/app/config.json
+      - ./web:/app/web:ro
       - ./data:/app/data
       - ./state:/app/state
       - ./logs:/app/logs

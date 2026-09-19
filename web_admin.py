@@ -330,8 +330,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    # 前端由宿主机 nginx 静态托管, 容器内没有 web/ 属正常, 只警告不退出
     if not os.path.exists(INDEX_PATH):
-        sys.exit(f"找不到页面文件: {INDEX_PATH}")
+        print(f"[admin] 提示: 未找到页面文件 {INDEX_PATH} (前端由 nginx 托管时属正常), /api 不受影响")
     if HOST != "127.0.0.1" and not get_admin_token():
         print("[admin] 警告: 绑定非本机地址但未设置 ADMIN_TOKEN, 接口无鉴权! "
               "强烈建议 ADMIN_HOST=0.0.0.0 时同时设置 ADMIN_TOKEN。")
