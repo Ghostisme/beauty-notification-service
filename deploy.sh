@@ -84,6 +84,9 @@ if [ -z "${ADMIN_TOKEN:-}" ]; then
   fi
 fi
 export ADMIN_TOKEN
+# 写进 .env(compose 自动读取), 保证以后手动 docker compose up 不再缺变量
+printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN" > .env
+chmod 600 .env
 echo "    ADMIN_TOKEN = $ADMIN_TOKEN"
 echo "    (已保存到 $APP_DIR/.admin_token, 管理后台页面输入它登录)"
 
