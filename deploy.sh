@@ -88,6 +88,23 @@ echo "    ADMIN_TOKEN = $ADMIN_TOKEN"
 echo "    (已保存到 $APP_DIR/.admin_token, 管理后台页面输入它登录)"
 
 echo "==> [4/6] 构建并启动后端容器"
+# 预拉取基础镜像: registry-1.docker.io 在国内常被 DNS 污染, 依次尝试镜像源, 成功后打回标准 tag
+BASE_IMG="python:3.12-slim"
+if ! docker image inspect "$BASE_IMG" >/dev/null 2>&1; then
+  for m in docker.1ms.run docker.m.daocloud.io dockerproxy.net docker.aityp.com; do
+    echo "    尝试从 $m 拉取 $BASE_IMG ..."
+    if docker pull "$m/library/$BASE_IMG"; then
+      docker tag "$m/library/$BASE_IMG" "$BASE_IMG"
+      echo "    基础镜像就绪(经 $m)"
+      break
+    fi
+  done
+fi
+if ! docker image inspect "$BASE_IMG" >/dev/null 2>&1; then
+  echo "    所有镜像源均失败, 请手动配置你自己的阿里云镜像加速器后重跑:"
+  echo "    登录 cr.console.aliyun.com -> 镜像加速器 -> 按提示写 /etc/docker/daemon.json"
+  exit 1
+fi
 docker compose up -d --build
 
 echo "==> [5/6] 配置全局 nginx (静态前端 + /api 反代)"
