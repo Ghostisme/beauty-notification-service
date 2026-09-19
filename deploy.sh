@@ -108,6 +108,12 @@ fi
 docker compose up -d --build
 
 echo "==> [5/6] 配置全局 nginx (静态前端 + /api 反代)"
+# 清理旧部署遗留的同域名配置(否则 server name 冲突, 新配置被忽略)
+conflict="$(grep -rl "$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v "sites-enabled/$DOMAIN$")"
+if [ -n "$conflict" ]; then
+  echo "    移除冲突的旧 nginx 配置: $conflict"
+  echo "$conflict" | xargs rm -f
+fi
 cat > /etc/nginx/sites-available/$DOMAIN <<EOF
 server {
     listen 80;
@@ -128,9 +134,14 @@ ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
 nginx -t && systemctl reload nginx
 
 echo "==> [6/6] 自检"
-sleep 2
 echo -n "  服务器出口IP(应 47.103.32.12): "; curl -s ifconfig.me || true; echo
-echo -n "  后端健康: "; curl -s http://127.0.0.1:$PORT/api/health || echo FAIL; echo
+echo -n "  后端健康: "
+for i in 1 2 3 4 5; do
+  sleep 2
+  R="$(curl -s -m 5 http://127.0.0.1:$PORT/api/health || true)"
+  if echo "$R" | grep -q '"ok"'; then echo "OK ($R)"; break; fi
+  [ "$i" = 5 ] && { echo "FAIL"; echo "  --- 容器日志(最后20行) ---"; docker compose logs --tail 20 2>/dev/null || true; }
+done
 echo -n "  页面: "; curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/ 2>/dev/null || \
        curl -s -o /dev/null -w "%{http_code}" http://localhost/ ; echo
 
