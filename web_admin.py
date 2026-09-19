@@ -164,15 +164,20 @@ def _fetch_and_store(cfg, m, lookback_minutes=None):
     return orders
 
 
-def api_orders_preview(merchant_spec, lookback_minutes=None, limit=20):
-    """拉单 -> 解密 -> 存库 -> 生成消息模板(不推送、不写去重状态)。"""
+def api_orders_preview(merchant_spec, lookback_minutes=None, limit=20, debug=False):
+    """拉单 -> 解密 -> 存库 -> 生成消息模板(不推送、不写去重状态)。debug=1 时附原始响应字段。"""
     cfg, m = _merchant_ctx(merchant_spec)
+    raw_items = None
+    if debug:
+        token = sync.get_client_token(cfg)
+        raw_orders = sync.fetch_orders_api(cfg, m, token, lookback_minutes=lookback_minutes)
+        raw_items = [o.get("_raw") for o in raw_orders[:3]]
     orders = _fetch_and_store(cfg, m, lookback_minutes)
     messages = sync.build_messages(orders, m["push"])
     brief = [{k: o.get(k) for k in ("order_id", "goods", "amount", "status", "phone", "created_at")}
              for o in orders]
     return {"merchant": m["name"], "account_id": m["account_id"],
-            "total": len(orders), "orders": brief,
+            "total": len(orders), "orders": brief, "raw": raw_items,
             "messages": [x["markdown"]["content"] for x in messages][:limit]}
 
 
@@ -285,7 +290,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_run("拉单预览", lambda: api_orders_preview(
                     merchant,
                     lookback_minutes=int((qs.get("lookback_minutes") or ["0"])[0]) or None,
-                    limit=int((qs.get("limit") or ["20"])[0])), merchant=merchant))
+                    limit=int((qs.get("limit") or ["20"])[0]),
+                    debug=(qs.get("debug") or ["0"])[0] == "1"), merchant=merchant))
             elif path == "/api/wecom/groups":
                 merchant = (qs.get("merchant") or [None])[0]
                 self._json(_run("查询客户群", lambda: api_wecom_groups(merchant), merchant=merchant))
