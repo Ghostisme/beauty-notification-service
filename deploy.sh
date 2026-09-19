@@ -137,10 +137,12 @@ server {
 }
 EOF
 ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
-nginx -t && systemctl reload nginx
+nginx -t
+# reload 偶发卡在 systemd 残留任务, 30s 超时兜底转 restart
+timeout 30 systemctl reload nginx || timeout 30 systemctl restart nginx || echo "    警告: nginx 重载异常, 请手动执行 systemctl restart nginx"
 
 echo "==> [6/6] 自检"
-echo -n "  服务器出口IP(应 47.103.32.12): "; curl -s ifconfig.me || true; echo
+echo -n "  服务器出口IP(应 47.103.32.12): "; curl -s -m 8 ifconfig.me || true; echo
 echo -n "  后端健康: "
 for i in 1 2 3 4 5; do
   sleep 2
