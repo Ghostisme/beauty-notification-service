@@ -112,10 +112,13 @@ docker compose up -d --build
 
 echo "==> [5/6] 配置全局 nginx (静态前端 + /api 反代)"
 # 清理旧部署遗留的同域名配置(否则 server name 冲突, 新配置被忽略)
-conflict="$(grep -rl "$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v "sites-enabled/$DOMAIN$")"
+# 注意: grep -r 不跟软链(sites-enabled 里都是软链), 必须直接搜真实文件所在目录
+conflict="$(grep -rln "$DOMAIN" /etc/nginx/sites-available/ /etc/nginx/conf.d/ 2>/dev/null | grep -v "sites-available/$DOMAIN$")"
 if [ -n "$conflict" ]; then
   echo "    移除冲突的旧 nginx 配置: $conflict"
   echo "$conflict" | xargs rm -f
+  # 同步移除指向已删文件的失效软链
+  for f in $conflict; do find /etc/nginx/sites-enabled/ -xtype l -lname "*$(basename "$f")" -delete 2>/dev/null; done
 fi
 cat > /etc/nginx/sites-available/$DOMAIN <<EOF
 server {
