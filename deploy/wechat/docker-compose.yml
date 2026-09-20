@@ -1,0 +1,53 @@
+# 云端微信 + 中继(普通微信号发群) 独立编排文件
+#
+# 为什么单独一份 compose?
+#   它是「重」服务(内存 800MB~1.2GB), 单独启停/单独升级, 不拖累主服务;
+#   宝塔面板 / 1Panel 的 Docker 面板也能直接把这份 YAML 粘进去跑。
+#
+# 启动:  cd deploy/wechat && docker compose up -d --build
+# 日志:  docker compose logs -f
+# 停止:  docker compose down
+#
+# 启动前在 shell 里:  export ADMIN_TOKEN=你的令牌
+services:
+  wxrelay:
+    build: .
+    image: dylk-wechat:latest
+    container_name: dylk-wechat
+    restart: unless-stopped
+    # 只绑回环, 外网访问一律走宿主机 nginx(加 Basic Auth) 反代到 6080
+    ports:
+      - "127.0.0.1:6080:6080"     # noVNC 网页版远程桌面
+      # - "127.0.0.1:5900:5900"   # 需要原生 VNC 客户端时打开
+    shm_size: "512m"              # Qt 客户端需要较大共享内存, 别省
+    environment:
+      - TZ=Asia/Shanghai
+      # 中继要从服务器待发队列取件。容器直连宿主机 127.0.0.1:8787 不通(只绑回环),
+      # 所以走公网域名经 nginx 反代——这也是最省事的做法。
+      - RELAY_SERVER=${RELAY_SERVER:-https://notification.hongquanquan.cn}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?请在环境变量中设置 ADMIN_TOKEN}
+      # 群名不是靠 Ctrl+F 搜索命中时, 用坐标点击搜索框(先跑 --calibrate 看截图定坐标)
+      # - WX_SEARCH_CLICK=96,58
+      # noVNC 与 VNC 的密码(强烈建议设置, 否则能访问 6080 的人就能看到你的微信)
+      - VNC_PASSWORD=${VNC_PASSWORD:-}
+      # 虚拟屏幕分辨率, 1核2G 别调大
+      - SCREEN_GEOMETRY=${SCREEN_GEOMETRY:-1280x800x24}
+      # 轮询节奏: 小批量低频, 降低风控概率
+      - RELAY_INTERVAL=60
+      - RELAY_LIMIT=3
+      # 调试时可加 --no-verify / --dry-run, 例如: RELAY_ARGS=--dry-run
+      # - RELAY_ARGS=--dry-run
+    volumes:
+      # 微信登录态/聊天数据持久化(重建容器不用重新扫码)
+      - ./wxdata:/data
+      # 中继脚本从宿主机挂进来: 改脚本只需 docker compose restart, 不用重建镜像
+      - ../../wx_relay_linux.py:/opt/relay/wx_relay_linux.py:ro
+    # 1核2G 机器上给容器设个上限, 防止把宿主拖死(按需调整)
+    mem_limit: 1200m
+    # 如需并入主服务网络(直接用 http://dylk-admin:8787 而不走公网域名), 取消下面注释:
+    # networks:
+    #   - dylk-net
+# networks:
+#   dylk-net:
+#     external: true
+#     name: dylk-to-wecom_default

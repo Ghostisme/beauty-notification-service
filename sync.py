@@ -25,10 +25,12 @@
     也可配置 douyin.phone_decrypt 走官方批量解密接口。
 
 推送目标:
-  - 内部群: 走群机器人 Webhook(简单可靠)
+  - 内部群: 走群机器人 Webhook(简单可靠, 无需认证/备案)
   - 外部客户群(含微信用户): 群机器人不支持, 走「客户联系-企业群发」API,
     群主需在手机端「群发助手」确认后消息才会发出,
     且每个客户群每天默认只能接收 1 条群发(可在群发助手调整规则)
+  - 普通微信群(零备案通道): target=outbox, 消息只入本地待发队列,
+    由 Windows 端 wx_relay.py 用普通微信号发送后回报状态
 """
 
 import argparse
@@ -41,6 +43,8 @@ import sys
 import time
 
 import requests
+
+import storage
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
@@ -486,13 +490,22 @@ def _fmt_amount(v):
         return v or "-"
 
 
-def format_order_template(o):
+def _phone_lines(o, push_cfg=None):
+    """手机号是否展示, 统一由 push.fields 决定(不写就不展示), 订单上没解出号码也不展示。"""
+    if "phone" not in ((push_cfg or {}).get("fields") or []):
+        return []
+    phone = o.get("phone")
+    return [f"📞 联系电话：{phone}"] if phone else []
+
+
+def format_order_template(o, push_cfg=None):
     return "\n".join([
         "🛍️【新订单提醒】",
         SEP,
         "🎉 您有一笔新的客户订单，请及时处理！",
         f"🧾 订单编号：{o.get('order_id') or '-'}",
         f"👤 客户姓名：{o.get('customer') or '-'}",
+        *_phone_lines(o, push_cfg),
         f"💰 订单金额：¥{_fmt_amount(o.get('amount'))}",
         f"📦 订单内容：{o.get('goods') or '-'}",
         f"🕒 下单时间：{o.get('created_at') or '-'}",
@@ -502,14 +515,14 @@ def format_order_template(o):
     ])
 
 
-def format_lead_template(o):
+def format_lead_template(o, push_cfg=None):
     src = o.get("shop") or "抖音来客"
     return "\n".join([
         "📣【新线索提醒】",
         SEP,
         "🎯 您有一条新的客户线索，请及时跟进！",
         f"👤 客户姓名：{o.get('customer') or '-'}",
-        f"📞 联系电话：{o.get('phone') or '-'}",
+        *_phone_lines(o, push_cfg),
         f"📍 线索来源：{src}",
         f"🕒 线索时间：{o.get('created_at') or '-'}",
         SEP,
@@ -518,7 +531,7 @@ def format_lead_template(o):
     ])
 
 
-def format_summary_template(orders, style):
+def format_summary_template(orders, style, push_cfg=None):
     """汇总模式: 一条消息含头部 + 每单核心字段块(受 max_orders_in_summary 限制)。"""
     blocks = []
     for o in orders[: int(20)]:
@@ -526,6 +539,7 @@ def format_summary_template(orders, style):
             blocks.append("\n".join([
                 f"🧾 订单编号：{o.get('order_id') or '-'}",
                 f"👤 客户姓名：{o.get('customer') or '-'}",
+                *_phone_lines(o, push_cfg),
                 f"💰 订单金额：¥{_fmt_amount(o.get('amount'))}",
                 f"📦 订单内容：{o.get('goods') or '-'}",
                 f"🕒 下单时间：{o.get('created_at') or '-'}",
@@ -533,7 +547,7 @@ def format_summary_template(orders, style):
         else:
             blocks.append("\n".join([
                 f"👤 客户姓名：{o.get('customer') or '-'}",
-                f"📞 联系电话：{o.get('phone') or '-'}",
+                *_phone_lines(o, push_cfg),
                 f"📍 线索来源：{o.get('shop') or '抖音来客'}",
                 f"🕒 线索时间：{o.get('created_at') or '-'}",
             ]))
@@ -557,11 +571,11 @@ def build_messages(orders, push_cfg):
     if style in ("order", "lead"):
         fmt = format_order_template if style == "order" else format_lead_template
         if push_cfg.get("per_order", False):
-            msgs = [{"msgtype": "markdown", "markdown": {"content": fmt(o) + suffix}}
+            msgs = [{"msgtype": "markdown", "markdown": {"content": fmt(o, push_cfg) + suffix}}
                     for o in orders]
         else:
             msgs = [{"msgtype": "markdown",
-                     "markdown": {"content": format_summary_template(orders, style) + suffix}}]
+                     "markdown": {"content": format_summary_template(orders, style, push_cfg) + suffix}}]
     elif push_cfg.get("per_order", False):
         msgs = [{"msgtype": "markdown", "markdown": {"content": format_order_md(o, push_cfg) + "\n" + suffix}}
                 for o in orders]
@@ -580,14 +594,28 @@ def build_messages(orders, push_cfg):
     return result
 
 
-def send_to_wecom(messages, wecom_cfg, dry_run=False):
-    """按 wecom.target 路由推送: internal(内部群webhook) / customer_group(外部客户群) / both。"""
-    target = wecom_cfg.get("target", "internal")
+def send_to_wecom(messages, wecom_cfg, dry_run=False, merchant=None):
+    """按 wecom.target 路由推送。
+
+    outbox        主通道: 只入本地待发队列, 由 wx_relay*.py 用微信号发到**微信群**(全自动)
+    internal      备用: 内部群机器人 Webhook(无需认证/备案, 但只支持企微内部群)
+    customer_group 备用: 企业群发 API(需企业认证 + 可信域名/可信IP, 且要群主手动确认)
+    both          备用: internal + customer_group
+
+    为什么默认值是 outbox 而不是 internal: 本项目的目标群是「微信群」(企微体系里叫
+    外部客户群 —— 群主是企微成员、成员里含微信客户, 在微信侧就是个普通群), 而外部群
+    不支持群机器人、企业群发又必须人工确认, 只有微信号中继能做到全自动。
+    """
+    target = str(wecom_cfg.get("target") or "outbox").lower()
     ok = True
     if target in ("internal", "both"):
         ok = send_to_internal(messages, wecom_cfg, dry_run=dry_run) and ok
     if target in ("customer_group", "both"):
         ok = send_to_customer_groups(messages, wecom_cfg, dry_run=dry_run) and ok
+    if target in ("outbox", "wechat_group", "wechat"):
+        ok = send_to_outbox(messages, wecom_cfg, merchant=merchant, dry_run=dry_run) and ok
+    if target not in ("internal", "customer_group", "both", "outbox", "wechat_group", "wechat"):
+        sys.exit(f"未知的推送目标 target={target!r}, 可选: internal / customer_group / outbox / both")
     return ok
 
 
@@ -676,6 +704,80 @@ def md_to_text(md):
     return "\n".join(l for l in lines if l)
 
 
+def phone_in_text(text):
+    """文本里是否出现过疑似手机号(11 位大陆号码)。"""
+    import re
+    return bool(re.search(r"(?<!\d)1[3-9]\d{9}(?!\d)", text or ""))
+
+
+# 【可选的安全提醒】群名里出现这些词 → 认为该群是「多客户群」(群里坐着多个客户,
+# 消息对所有客户可见), 才会提示「这条消息里的手机号/客户姓名会被别的客户看到」。
+# 判断只看【目标群名称】, 不看消息内容; 只提醒, 不拦截, 不改内容。
+#
+# 本项目实际场景(2026-09-20 与业主确认):
+#   目标群是【门店群】, 群成员 = 代运营方 + 美业企业老板 + 店长, 群内没有别的客户。
+#   客户是通过抖音来客留资/下单的, 群只是内部接收点 → 提醒没有意义, 已在 config.json
+#   里把 privacy_multi_customer_keywords 显式置为 [] 关掉。手机号照常展示。
+#
+# 关键词支持通配符: * = 任意多个字符, ? = 正好一个字符(不加通配符就是普通子串包含, 忽略大小写)。
+# 例: 群名形如「品牌-省-市+门店」时, 写一条「某某品牌-*」可覆盖该品牌全部门店群 ——
+#     这是通配符用法【示例】, 是否要加请按自己的群名确认, 不要照抄。
+# 想彻底关掉提醒: 显式置为 []; 也可在 merchants[].wecom 里按商户覆盖。
+DEFAULT_MULTI_CUSTOMER_KEYWORDS = [
+    "客户群", "客户服务群", "客服群", "顾客群", "会员群", "福利群", "粉丝群", "用户群", "VIP群",
+]
+
+
+def _kw_matches(keyword, name):
+    """单个关键词是否命中群名(忽略大小写)。支持 * 和 ? 通配符。"""
+    import re
+    kw = str(keyword or "").strip().lower()
+    if not kw:
+        return False
+    if "*" not in kw and "?" not in kw:
+        return kw in name
+    pattern = "".join(
+        ".*" if ch == "*" else "." if ch == "?" else re.escape(ch) for ch in kw
+    )
+    return re.search(pattern, name) is not None
+
+
+def matched_keywords(group_name, keywords=None):
+    """返回群名里命中的「多客户群」关键词列表(空列表 = 不是多客户群)。
+
+    关键词支持 * / ? 通配符; 传 [] 表示不做这类判断。
+    """
+    name = (group_name or "").strip().lower()
+    kws = DEFAULT_MULTI_CUSTOMER_KEYWORDS if keywords is None else (keywords or [])
+    if not name:
+        return []
+    return [str(k).strip() for k in kws if _kw_matches(k, name)]
+
+
+def is_multi_customer_group(group_name, keywords=None):
+    """按【群名称】判断该群是否可能坐着多个客户(消息对所有客户可见)。
+
+    keywords 传 [] 表示不做这类判断, 一律返回 False(即不再提醒)。
+    """
+    return bool(matched_keywords(group_name, keywords))
+
+
+# 隐私键的默认值。配置里"没写"= 用默认; 显式写成 [] = 关掉该项。
+PRIVACY_DEFAULTS = {
+    "privacy_multi_customer_keywords": DEFAULT_MULTI_CUSTOMER_KEYWORDS,
+    "privacy_warn_fields": ["phone"],
+}
+
+
+def wecom_with_privacy_defaults(wecom_cfg):
+    """给 wecom 配置补上隐私默认值(仅用于界面展示与落盘, 不改判定逻辑)。"""
+    out = dict(wecom_cfg or {})
+    for key, default in PRIVACY_DEFAULTS.items():
+        if out.get(key) is None:
+            out[key] = list(default)
+    return out
+
+
 def chunk_text(text, max_bytes=1900):
     """按 UTF-8 字节数切块(群发文本建议控制在 2048 字节内), 尽量在换行处断开。"""
     chunks = []
@@ -732,6 +834,118 @@ def send_to_customer_groups(messages, wecom_cfg, dry_run=False):
     return ok
 
 
+# ---------------- 零备案通道: 普通微信群(待发队列) ----------------
+
+TEST_MERCHANT = "链路测试"
+_last_test_stamp_ms = 0
+
+
+def _next_test_stamp():
+    """给测试消息生成一个「一定不会和上一条重复」的时间戳。
+
+    队列按内容去重, 同一毫秒连点两次会被当成重复内容丢掉 —— 这里用单调递增兜底,
+    保证每次点都真的能排进去一条。
+    """
+    global _last_test_stamp_ms
+    ms = int(time.time() * 1000)
+    if ms <= _last_test_stamp_ms:
+        ms = _last_test_stamp_ms + 1
+    _last_test_stamp_ms = ms
+    return dt.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S.") + f"{ms % 1000:03d}"
+
+
+def build_test_message(group_name=""):
+    """生成一条「链路测试」消息。
+
+    用途: 在不动真实订单、不占用任何门店群的前提下, 验证
+        服务器待发队列 → 微信号中继 → 微信群 → 回报
+    整条链路是否通。内容里带毫秒级时间戳, 避免被队列的幂等键当成重复内容丢掉。
+    """
+    ts = _next_test_stamp()
+    return "\n".join([
+        "🧪【链路测试】",
+        "--------------------------------",
+        f"在「{group_name or '本群'}」里看到这条, 说明整条链路已经打通:",
+        "抖音来客 → 服务器待发队列 → 微信号中继 → 微信群 ✔",
+        f"发送时间: {ts}",
+        "(仅测试, 可忽略; 不需要时在「待发队列」页签删掉即可)",
+    ])
+
+
+def enqueue_test_message(wecom_cfg, group=None):
+    """把一条测试消息写进待发队列, 发往指定的测试群。
+
+    默认用 wecom.test_group; 没配就报错提示, 不会误发到某个真实门店群。
+    """
+    target = (group or (wecom_cfg or {}).get("test_group") or "").strip()
+    if not target:
+        raise ValueError("没有可用的测试群名: 请在全局配置里填「测试群名称」"
+                         "(例如 抖音本地生活订单通知), 或在本页输入框里临时指定。")
+    content = build_test_message(target)
+    n = storage.enqueue_outbox([content], merchant=TEST_MERCHANT, account_id="",
+                               channel="test", target=target)
+    # 定位刚入队的那一条, 方便界面/测试精确删掉它, 而不是按商户名批量清
+    row_id = None
+    for it in storage.list_outbox(status="pending", page_size=100).get("items", []):
+        if (it.get("merchant") == TEST_MERCHANT and it.get("target") == target
+                and it.get("content") == content):
+            row_id = it.get("id")
+            break
+    pending = storage.outbox_stats().get("pending", 0)
+    print(f"[outbox] 测试消息已入队 {n} 条 → 「{target}」(当前待发 {pending} 条),"
+          f" 等中继发出后到群里看一眼即可。")
+    return {"enqueued": n, "target": target, "content": content, "id": row_id,
+            "pending": pending, "outbox": storage.outbox_stats()}
+
+
+def send_to_outbox(messages, wecom_cfg, merchant=None, dry_run=False):
+    """把消息写入本地待发队列, 由 Windows 端 wx_relay.py 用普通微信号发到微信群。
+
+    为什么能用: 个人微信号没有开放接口, 但可以在你自己的 Windows 电脑上运行
+    「微信 PC 客户端 + UIAutomation」把消息发出去 — 不经过企业微信任何审核,
+    因此不需要企业认证、不需要可信域名、不需要 ICP 备案。
+    代价: 属于客户端自动化操作, 有账号风险, 建议用小号 + 控制频率。
+    """
+    target = (wecom_cfg.get("wechat_group") or wecom_cfg.get("group_name") or "").strip()
+    parts = []
+    for m in messages:
+        parts.extend(chunk_text(md_to_text(m["markdown"]["content"])))
+    # 敏感信息提醒: 只看【目标群名称】, 不看消息内容。
+    #   群名命中 privacy_multi_customer_keywords → 认定群里坐着多个客户(客户之间互相可见), 才提醒;
+    #   不命中(门店内部群 / 工作群 / 一人一群的专属服务群等) → 一句话都不多说。
+    # 只提醒、不拦截、也不动内容: 号码本来就是该商户自己客户的, 发不发由商家判断。
+    kws = wecom_cfg.get("privacy_multi_customer_keywords")
+    hits = matched_keywords(target, kws)
+    if hits:
+        warn_fields = wecom_cfg.get("privacy_warn_fields") or ["phone"]
+        if "phone" in warn_fields and any(phone_in_text(p) for p in parts):
+            print(f"[outbox] ⚠ 群「{target}」看着是多客户群(群名命中 {'/'.join(hits)}), 群内客户互相可见;"
+                  " 这条消息里的手机号会同时被其他客户看到。"
+                  " 若这个群其实只有店家与该客户, 把该商户 wecom.privacy_multi_customer_keywords 置为 [] 即可。")
+        if "customer" in warn_fields and "customer" in ((merchant or {}).get("push", {}).get("fields") or []):
+            print("[outbox] ⚠ 同上: 消息里带「客户姓名」, 群里其他客户也看得到。")
+    if not parts:
+        print("[outbox] 没有可入队的消息。")
+        return True
+    if dry_run:
+        for i, p in enumerate(parts, 1):
+            print(f"--- 待发队列 {i}/{len(parts)} (dry-run, 未入队) ---")
+            print(p)
+            print()
+        return True
+    if not target:
+        sys.exit("未配置微信接收群名称, 请编辑 config.json 对应商户的 wecom.wechat_group"
+                 "(必须与微信里的群名称完全一致)。")
+    merchant = merchant or {}
+    n = storage.enqueue_outbox(parts, merchant=merchant.get("name", ""),
+                               account_id=merchant.get("account_id", ""),
+                               channel="wechat_group", target=target)
+    pending = storage.outbox_stats().get("pending", 0)
+    print(f"[outbox] 已入队 {n} 条 → 微信群「{target}」(当前待发 {pending} 条), "
+          f"等待 Windows 端中继发送。")
+    return True
+
+
 # ---------------- 单商户执行 ----------------
 
 def state_file_for(merchant):
@@ -740,8 +954,8 @@ def state_file_for(merchant):
     return "state.json"
 
 
-def process_merchant(cfg, merchant, orders, dry_run=False, all_mode=False):
-    """去重 -> 构建消息 -> 按商户自己的 wecom 配置推送。"""
+def process_merchant(cfg, merchant, orders, dry_run=False, all_mode=False, target_override=None):
+    """去重 -> 构建消息 -> 按商户自己的 wecom 配置推送。target_override 可临时改推送通道。"""
     tag = f"[{merchant['name']}]"
     if all_mode or dry_run:
         new_orders = orders
@@ -752,7 +966,10 @@ def process_merchant(cfg, merchant, orders, dry_run=False, all_mode=False):
     if not messages:
         print(f"{tag} 没有需要推送的订单。")
         return True
-    return send_to_wecom(messages, merchant["wecom"], dry_run=dry_run)
+    wecom_cfg = dict(merchant["wecom"])
+    if target_override:
+        wecom_cfg["target"] = target_override
+    return send_to_wecom(messages, wecom_cfg, dry_run=dry_run, merchant=merchant)
 
 
 # ---------------- 常驻服务模式 ----------------

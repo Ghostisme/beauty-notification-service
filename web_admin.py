@@ -79,12 +79,36 @@ def _summarize(data):
                 return f"客户群 {len(data['groups'])} 个"
             if "saved" in data:
                 return "配置已保存"
+            if "enqueued" in data:
+                return f"链路测试消息入队 {data.get('enqueued')} 条 → 「{data.get('target')}」"
+            if "rebinds" in data:
+                rbs = data.get("rebinds") or []
+                base = f"商户共 {len(data.get('merchants') or [])} 个"
+                if rbs:
+                    base += (f"; 群名重绑定 {sum(r['updated'] for r in rbs)} 条 → "
+                             f"「{rbs[0]['to']}」")
+                return base
             if "merchants" in data:
                 return f"商户共 {len(data['merchants'])} 个"
             if "logs" in data:
                 return f"日志 {data.get('total')} 条"
             if "orders" in data:
                 return f"订单 {data.get('total')} 条"
+            if "items" in data:
+                return f"待发队列 {data.get('total')} 条"
+            if "acked" in data:
+                return f"中继回报 {data.get('acked')} 条 (ok={data.get('ok')})"
+            if "retried" in data:
+                return f"重置重发 {data.get('retried')} 条"
+            if "deleted" in data:
+                return f"删除待发 {data.get('deleted')} 条"
+            if "rebound" in data:
+                r = data["rebound"]
+                return (f"群名重绑定: {r.get('updated')} 条改指「{r.get('to')}」"
+                        f"(旧群名 {'/'.join(r.get('old_targets') or []) or '无'})")
+            if "bindings" in data:
+                bad = [b for b in data["bindings"] if b.get("stale_total")]
+                return f"绑定检查 {len(data['bindings'])} 个商户, {len(bad)} 个存在旧群名残留"
     except Exception:
         pass
     return ""
@@ -113,13 +137,77 @@ def _run(action, fn, merchant=None):
 # ---------------- API 实现 ----------------
 
 def api_get_config():
-    return {"config": _load_cfg()}
+    cfg = _load_cfg()
+    # 隐私键没配时补上默认值, 让界面看到的是「实际生效」的那份, 避免保存时被写空。
+    cfg["wecom"] = sync.wecom_with_privacy_defaults(cfg.get("wecom") or {})
+    return {"config": cfg}
+
+
+def _effective_groups(cfg):
+    """算出每个商户「实际生效」的接收群名(商户级 > 全局), 用于识别群名变更。"""
+    out = {}
+    try:
+        for m in sync.normalize_merchants(cfg):
+            out[m["name"]] = (m["wecom"].get("wechat_group") or "").strip()
+    except Exception:
+        pass
+    return out
+
+
+def _rebind_changed(old_groups, new_groups, only=None, retry_failed=True):
+    """群名一变, 顺手把待发队列里还指着旧群名、尚未发出的消息重新绑定到新群名。
+
+    这就是「改一个字段就完成换群绑定」的实现: 不用去队列里逐条删。
+    """
+    rebinds = []
+    for name, new_g in new_groups.items():
+        if only is not None and name != only:
+            continue
+        old_g = (old_groups.get(name) or "").strip()
+        if not new_g or not old_g or new_g == old_g:
+            continue
+        r = storage.rebind_outbox_target(name, new_g, old_target=old_g, retry_failed=retry_failed)
+        if r["updated"] or r["merged"]:
+            logger.info("群名重绑定 [%s] 「%s」→「%s」: 改 %s 条 / 合并重复 %s 条",
+                        name, old_g, new_g, r["updated"], r["merged"])
+            rebinds.append({"merchant": name, "from": old_g, **r})
+    return rebinds
 
 
 def api_save_config(cfg):
     json.dumps(cfg)
+    old_groups = _effective_groups(_load_cfg())
+    new_groups = _effective_groups(cfg)
+    rebinds = _rebind_changed(old_groups, new_groups)
     _save_cfg(cfg)
-    return {"saved": True}
+    for rb in rebinds:
+        print(f"[群名重绑定] 商户「{rb['merchant']}」: 「{rb['from']}」→「{rb['to']}」,"
+              f" 队列中 {rb['updated']} 条已改指新群" +
+              (f", 合并重复 {rb['merged']} 条" if rb["merged"] else ""))
+    return {"saved": True, "rebinds": rebinds}
+
+
+def api_group_binding():
+    """列出每个商户的群绑定情况: 配置里绑的群 vs 队列里还没发出去的群名。
+
+    群被改名后, 队列里会残留旧的群名 —— 这里就是用来一眼看出「哪条还指着旧名字」的。
+    """
+    cfg = _load_cfg()
+    bindings = []
+    for m in sync.normalize_merchants(cfg):
+        configured = (m["wecom"].get("wechat_group") or "").strip()
+        targets = storage.pending_targets(m["name"])
+        stale = {t: v for t, v in targets.items() if t != configured}
+        bindings.append({
+            "merchant": m["name"],
+            "target": m["wecom"].get("target") or "outbox",
+            "configured_group": configured,
+            "queued_targets": targets,
+            "stale_targets": stale,
+            "stale_total": sum(v["total"] for v in stale.values()),
+            "ok_total": (targets.get(configured) or {}).get("total", 0),
+        })
+    return {"bindings": bindings}
 
 
 def api_merchant_save(body):
@@ -130,12 +218,54 @@ def api_merchant_save(body):
     merchants = cfg.setdefault("merchants", [])
     idx = body.get("index")
     clean = {k: m.get(k) for k in ("account_id", "name", "wecom", "push") if m.get(k) is not None}
+
+    old_groups = _effective_groups(cfg)
+    old_name = merchants[idx].get("name") or "" if (isinstance(idx, int) and 0 <= idx < len(merchants)) else ""
+
     if isinstance(idx, int) and 0 <= idx < len(merchants):
         merchants[idx].update(clean)
+        new_name = merchants[idx].get("name") or ""
     else:
         merchants.append(clean)
+        new_name = clean.get("name") or ""
+
+    if old_name and new_name and old_name != new_name:
+        n = storage.rename_outbox_merchant(old_name, new_name)
+        if n:
+            logger.info("商户改名 [%s] → [%s]: 队列中 %s 条记录一并改名", old_name, new_name, n)
+            print(f"[商户改名] 「{old_name}」→「{new_name}」, 队列中 {n} 条记录一同改名。")
+
+    rebinds = []
+    if old_name == new_name and new_name:
+        rebinds = _rebind_changed(old_groups, _effective_groups(cfg), only=new_name)
+    for rb in rebinds:
+        print(f"[群名重绑定] 商户「{rb['merchant']}」: 「{rb['from']}」→「{rb['to']}」,"
+              f" 队列中 {rb['updated']} 条已改指新群" +
+              (f", 合并重复 {rb['merged']} 条" if rb["merged"] else ""))
+
     _save_cfg(cfg)
-    return {"merchants": merchants}
+    return {"merchants": merchants, "rebinds": rebinds}
+
+
+def api_outbox_rebind(body):
+    """手工「重新绑定」: 把某商户队列里还没发出去的消息, 全部改指到配置里当前的群名。
+
+    用在群被改名、但配置是早前改的(那时还没自动重绑定)这一类历史遗留场景。
+    """
+    spec = (body.get("merchant") or "").strip()
+    cfg = _load_cfg()
+    m = sync.pick_merchant(sync.normalize_merchants(cfg), spec or None)
+    to = (m["wecom"].get("wechat_group") or "").strip()
+    if not to:
+        raise ValueError(f"商户「{m['name']}」还没配「微信接收群名称」, "
+                         "请先在商户卡里把新群名填好并保存, 再来重新绑定。")
+    old = (body.get("from") or "").strip() or None
+    r = storage.rebind_outbox_target(m["name"], to, old_target=old,
+                                     retry_failed=bool(body.get("retry_failed", True)))
+    print(f"[群名重绑定] 商户「{m['name']}」: 旧群名 {('/'.join(r['old_targets']) or '(无)')}"
+          f" → 「{to}」, 改指 {r['updated']} 条" +
+          (f", 合并重复 {r['merged']} 条" if r["merged"] else ""))
+    return {"merchant": m["name"], "rebound": r}
 
 
 def api_merchant_delete(body):
@@ -185,8 +315,64 @@ def api_push(body):
     """真实推送: 拉单存库 -> 走去重 -> 推送。dry_run=true 只打印消息不发送。"""
     cfg, m = _merchant_ctx(body.get("merchant"))
     orders = _fetch_and_store(cfg, m, body.get("lookback_minutes"))
-    ok = sync.process_merchant(cfg, m, orders, dry_run=bool(body.get("dry_run")))
+    ok = sync.process_merchant(cfg, m, orders, dry_run=bool(body.get("dry_run")),
+                               target_override=body.get("target") or None)
     return {"ok_push": ok, "fetched": len(orders)}
+
+
+# ---------------- 待发队列(零备案通道: 普通微信号中继) ----------------
+
+def api_outbox(qs):
+    """Windows 中继轮询取件; 后台页面也用这个接口看队列。"""
+    return storage.list_outbox(
+        status=(qs.get("status") or [None])[0],
+        merchant=(qs.get("merchant") or [None])[0],
+        page=int((qs.get("page") or ["1"])[0]),
+        page_size=int((qs.get("page_size") or ["50"])[0]))
+
+
+def api_outbox_ack(body):
+    ids = body.get("ids") or []
+    ok = bool(body.get("ok"))
+    n = storage.ack_outbox(ids, ok, err=body.get("err") or "")
+    return {"acked": n, "ok": ok, "outbox": storage.outbox_stats()}
+
+
+def api_outbox_retry(body):
+    return {"retried": storage.retry_outbox(body.get("ids") or []),
+            "outbox": storage.outbox_stats()}
+
+
+def api_outbox_delete(body):
+    return {"deleted": storage.delete_outbox(body.get("ids") or []),
+            "outbox": storage.outbox_stats()}
+
+
+def api_outbox_enqueue(body):
+    """拉单 -> 去重 -> 构建消息 -> 只入待发队列(不调用企业微信任何接口)。"""
+    cfg, m = _merchant_ctx(body.get("merchant"))
+    orders = _fetch_and_store(cfg, m, body.get("lookback_minutes"))
+    ok = sync.process_merchant(cfg, m, orders, target_override="outbox")
+    return {"ok_push": ok, "fetched": len(orders), "outbox": storage.outbox_stats()}
+
+
+def api_outbox_test(body):
+    """往「测试群」塞一条链路测试消息(不碰任何门店群、不拉订单)。
+
+    用来验证: 服务器队列 → 微信号中继 → 微信群 → 回报 是否已经通。
+    """
+    cfg = _load_cfg()
+    wecom = dict(cfg.get("wecom") or {})
+    group = (body.get("group") or "").strip()
+    # 允许临时指定; 不指定就用全局配置里的测试群
+    res = sync.enqueue_test_message(wecom, group=group or None)
+    # 顺手把临时指定的群名记下来, 下次不用重填
+    if group and group != wecom.get("test_group"):
+        wecom["test_group"] = group
+        cfg["wecom"] = wecom
+        _save_cfg(cfg)
+        res["saved_test_group"] = group
+    return res
 
 
 def api_test_douyin():
@@ -270,13 +456,17 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, "text/html; charset=utf-8", f.read())
                 return
             if path == "/api/health":
-                self._json({"ok": True, "service": "dylk-wecom-admin"})
+                self._json({"ok": True, "service": "dylk-wecom-admin",
+                            "outbox": storage.outbox_stats()})
                 return
             if not self._authed(qs):
                 self._json({"ok": False, "error": "unauthorized: 缺少或错误的访问令牌(X-Admin-Token)"}, 401)
                 return
             if path == "/api/config":
                 self._json(_run("查看配置", api_get_config))
+            elif path == "/api/outbox":
+                self._json(_run("查看待发队列", lambda: api_outbox(qs),
+                                merchant=(qs.get("merchant") or [None])[0]))
             elif path == "/api/orders":
                 self._json(_run("查询订单库", lambda: api_orders(qs),
                                 merchant=(qs.get("merchant") or [None])[0]))
@@ -292,6 +482,8 @@ class Handler(BaseHTTPRequestHandler):
                     lookback_minutes=int((qs.get("lookback_minutes") or ["0"])[0]) or None,
                     limit=int((qs.get("limit") or ["20"])[0]),
                     debug=(qs.get("debug") or ["0"])[0] == "1"), merchant=merchant))
+            elif path == "/api/group/binding":
+                self._json(_run("检查群绑定", api_group_binding))
             elif path == "/api/wecom/groups":
                 merchant = (qs.get("merchant") or [None])[0]
                 self._json(_run("查询客户群", lambda: api_wecom_groups(merchant), merchant=merchant))
@@ -326,6 +518,20 @@ class Handler(BaseHTTPRequestHandler):
                                 lambda: api_push(body), merchant=merchant))
             elif path == "/api/test/douyin":
                 self._json(_run("测试来客凭证", api_test_douyin))
+            elif path == "/api/outbox/enqueue":
+                merchant = body.get("merchant")
+                self._json(_run("拉单入待发队列", lambda: api_outbox_enqueue(body), merchant=merchant))
+            elif path == "/api/outbox/test":
+                self._json(_run("发送链路测试消息", lambda: api_outbox_test(body)))
+            elif path == "/api/outbox/rebind":
+                merchant = body.get("merchant")
+                self._json(_run("群名重绑定", lambda: api_outbox_rebind(body), merchant=merchant))
+            elif path == "/api/outbox/ack":
+                self._json(_run("中继回报发送结果", lambda: api_outbox_ack(body)))
+            elif path == "/api/outbox/retry":
+                self._json(_run("重发待发消息", lambda: api_outbox_retry(body)))
+            elif path == "/api/outbox/delete":
+                self._json(_run("删除待发消息", lambda: api_outbox_delete(body)))
             else:
                 self._json({"ok": False, "error": "not found"}, 404)
         except json.JSONDecodeError as e:

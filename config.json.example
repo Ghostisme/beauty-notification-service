@@ -16,9 +16,9 @@
     "account_id": ""
   },
   "wecom": {
-    "comment": "默认企业微信推送配置(未在 merchants 单独覆盖时生效)",
-    "target": "internal",
-    "comment_webhook": "内部群机器人 Webhook。外部客户群不支持机器人, 走 corpid/chat_id_list 的企业群发",
+    "comment": "推送默认配置(未在 merchants 单独覆盖时生效)。本项目只推【微信群】",
+    "target": "outbox",
+    "comment_webhook": "【备用】内部群机器人 Webhook: 只支持企微内部群, 外部群/客户群官方不支持",
     "webhook_url": "在此填入企业微信群机器人Webhook地址",
     "mention_mobile_list": [
       "@all"
@@ -29,7 +29,16 @@
     "secret": "在此填入自建应用的Secret",
     "sender": "",
     "comment_sender": "可选: 执行群发的成员userid(通常是群主), 留空则由应用自动分配",
-    "chat_id_list": []
+    "chat_id_list": [],
+    "comment_target": "只用 outbox: 服务器把文案写进待发队列, 由 wx_relay.py 用微信号发到微信群(企微体系里叫外部客户群) —— 全自动, 不需要企业认证/可信域名/可信IP/ICP备案。 internal / customer_group / both 是备用通道, 均无法做到全自动。",
+    "comment_wechat_group": "【必填】要收通知的那个微信群名, 必须与微信客户端里显示的群名完全一致。各门店群名形如「品牌-省-市门店店」(例如 玥笙-辽宁-大连中山店), 建议每个商户在自己的 merchants[].wecom.wechat_group 里各填各的。群名拿不准就先跑 python wx_relay.py --list-groups 复制真实会话名。",
+    "wechat_group": "",
+    "comment_privacy": "敏感信息提醒开关(可选功能): 只按【目标群名称】判断, 不看消息内容。群名命中 privacy_multi_customer_keywords 里任一条 → 认为该群坐着多个客户(消息对所有客户可见), 才提示手机号/客户姓名会被别的客户看到; 不命中则不提示。支持通配符: * = 任意多个字符, ? = 正好一个字符(不加通配符就是普通子串包含, 忽略大小写)。【本项目实际场景】目标群是门店群, 群成员 = 代运营方 + 美业企业老板 + 店长, 群内并没有别的客户(客户是通过抖音来客留资/下单的), 所以这里显式置为 [] 关掉提醒, 手机号照常展示。以后若真把消息发进了「多个客户共存」的群, 再按你们群名规律填词进来即可。",
+    "privacy_multi_customer_keywords": [],
+    "comment_privacy_warn_fields": "仅当上面关键词命中(判定为多客户群)时, 提示哪些字段。可选: phone / customer。本项目提醒已关, 留空数组即可; 以后重开提醒时再填。",
+    "privacy_warn_fields": [],
+    "comment_test_group": "专门用来试链路的【测试群】, 例如 抖音本地生活订单通知(把几个关键号都拉进去)。在「待发队列」页签点「发一条测试消息」时只发到这里, 不会误发到任何门店群。",
+    "test_group": "抖音本地生活订单通知"
   },
   "push": {
     "comment": "默认推送样式(未在 merchants 单独覆盖时生效)。phone=客户手机号(需解密成功才有值)",
@@ -42,8 +51,8 @@
       "goods",
       "amount",
       "status",
-      "phone",
       "customer",
+      "phone",
       "created_at",
       "shop"
     ]
@@ -54,8 +63,8 @@
       "account_id": "7605435122824890377",
       "name": "超英皮肤定制管理",
       "wecom": {
-        "webhook_url": "在此填入该商户对应的群机器人Webhook(仅内部群用, 外部客户群不用这里)",
-        "target": "internal"
+        "target": "outbox",
+        "wechat_group": "该商户的微信群名"
       }
     },
     {

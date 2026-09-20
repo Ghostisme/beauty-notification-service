@@ -85,7 +85,7 @@
     <span class="arrow">→</span>
     <span class="stage">✉️ 消息模板<br><span>汇总 / 单订单</span></span>
     <span class="arrow">→</span>
-    <span class="stage">🚀 企微推送<br><span>内部群 / 客户群群发</span></span>
+    <span class="stage">🚀 推送<br><span>内部群 / 客户群 / 微信群中继</span></span>
     <span class="arrow">→</span>
     <span class="stage">🧾 日志追踪<br><span>SQLite 落库</span></span>
   </div>
@@ -94,6 +94,7 @@
     <button class="tab active" data-tab="merchants" onclick="switchTab(this)">🏪 商户管理</button>
     <button class="tab" data-tab="orders" onclick="switchTab(this)">📦 订单数据</button>
     <button class="tab" data-tab="logs" onclick="switchTab(this)">🧾 运行日志</button>
+    <button class="tab" data-tab="outbox" onclick="switchTab(this)">📤 待发队列</button>
   </div>
 
   <!-- 令牌 -->
@@ -114,13 +115,15 @@
       <div class="grid">
         <div><label>client_key</label><input id="g_key"></div>
         <div><label>client_secret</label><input id="g_secret" type="password"></div>
-        <div><label>默认推送目标 target</label>
+        <div><label>推送方式（唯一通道：微信群里自动发送）</label>
           <select id="g_target">
-            <option value="internal">internal（内部群 Webhook）</option>
-            <option value="customer_group">customer_group（外部客户群群发）</option>
-            <option value="both">both（两边都发）</option>
+            <option value="outbox">outbox（微信群 · 微信号中继，全自动）</option>
+            <option value="internal">internal（备用：企微内部群 Webhook）</option>
+            <option value="customer_group">customer_group（备用：企微外部客户群群发，需认证备案 + 群主手动确认）</option>
+            <option value="both">both（备用：内部群 + 客户群）</option>
           </select>
         </div>
+        <div><label>微信接收群名称（必填，与微信里显示的群名完全一致；群被改名了就改这里）</label><input id="g_wechat_group" placeholder="例如：余乐圈客户服务群"></div>
         <div><label>增量拉单时间窗（分钟）</label><input id="g_lookback" type="number" min="1"></div>
         <div><label>手机号解密策略</label>
           <select id="g_phone">
@@ -135,12 +138,19 @@
             <option value="true">true（每单一条）</option>
           </select>
         </div>
-        <div><label>默认内部群 Webhook URL</label><input id="g_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></div>
-        <div><label>企微企业ID corpid</label><input id="g_corpid"></div>
-        <div><label>企微应用 Secret</label><input id="g_wecom_secret" type="password"></div>
-        <div><label>展示字段（逗号分隔）</label><input id="g_fields"></div>
-        <div style="grid-column: 1 / -1;"><label>默认客户群 chat_id_list（逗号分隔）</label><textarea id="g_chats"></textarea></div>
+        <div style="grid-column: 1 / -1;"><label>展示字段（逗号分隔）</label><input id="g_fields"></div>
+        <div style="grid-column: 1 / -1;"><label>多客户群关键词（可选；留空 = 不提醒。支持通配符 * 和 ?）</label><input id="g_privacy_kw" placeholder="留空即可。若要开启提醒，填群名关键词，例如：客户群, 会员群"></div>
       </div>
+      <div class="muted" style="margin-top:10px">ℹ 目标群是<b>门店群</b>（群内是代运营方 + 老板 + 店长，没有别的客户），所以这个「多客户群提醒」默认<b>已关闭</b>，手机号照常展示。将来若把消息发进了「多个客户共存」的群，再在这里填群名关键词（只看群名、不看内容；只提示、不拦截、不改内容）。</div>
+      <details style="margin-top:10px">
+        <summary class="muted" style="cursor:pointer">备用通道设置（企业认证 / 备案走通之后才需要，现在不用管）</summary>
+        <div class="grid" style="margin-top:10px">
+          <div><label>默认内部群 Webhook URL</label><input id="g_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></div>
+          <div><label>企微企业ID corpid</label><input id="g_corpid"></div>
+          <div><label>企微应用 Secret</label><input id="g_wecom_secret" type="password"></div>
+          <div style="grid-column: 1 / -1;"><label>默认客户群 chat_id_list（逗号分隔）</label><textarea id="g_chats"></textarea></div>
+        </div>
+      </details>
       <div class="row" style="margin-top:12px">
         <button class="btn" onclick="saveGlobal()">保存全局配置</button>
       </div>
@@ -208,6 +218,69 @@
       </div>
       <div style="overflow-x:auto"><table id="logsTable"><thead>
         <tr><th>时间</th><th>级别</th><th>商户</th><th>操作</th><th>结果</th><th>详情</th></tr>
+      </thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- TAB 待发队列(零备案通道) -->
+  <div id="tab-outbox" class="hidden">
+    <div class="card">
+      <h2>🔗 群绑定（群被改名了就来这里）
+        <span class="row">
+          <button class="btn ghost small" onclick="loadBinding()">🔄 检查</button>
+          <button class="btn small" onclick="rebindAll()">🔗 全部重新绑定到当前群名</button>
+        </span>
+      </h2>
+      <div class="muted" style="margin-bottom:10px;line-height:1.7">
+        队列里的群名是<b>入队那一刻写死</b>的。群一旦被改名（通常是企微群主在手机上改的），存量消息就会一直发不出去，中继会报「找不到群」。<br>
+        <b>改商户卡里的「微信接收群名称」并保存 → 队列里还指着旧群名的消息会自动改指到新群</b>，已 failed 的还会被重置为待发、由中继重发。下面这张表用来查有没有漏网的。
+      </div>
+      <div style="overflow-x:auto"><table id="bindTable"><thead>
+        <tr><th>商户</th><th>配置的群名</th><th>已对齐（待发）</th><th>残留的旧群名（待发/失败）</th><th>操作</th></tr>
+      </thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>🧪 链路测试（发到测试群，不碰门店群）</h2>
+      <div class="muted" style="margin-bottom:10px;line-height:1.7">
+        往<b>测试群</b>塞一条测试消息，用来验证「服务器队列 → 微信号中继 → 微信群 → 回报」整条链路是否通。
+        它<b>不拉订单、不占用任何门店群</b>，并且会带上时间戳，所以可以反复点。<br>
+        前提：中继用的那个微信号已经在测试群里（把几个关键号都拉进去，谁都能帮着看）。
+      </div>
+      <div class="row">
+        <input id="ob_test_group" placeholder="测试群名称，例如：抖音本地生活订单通知" style="flex:1;min-width:280px">
+        <button class="btn" onclick="sendTest()">🧪 发一条测试消息</button>
+      </div>
+      <div class="muted" id="ob_test_hint" style="margin-top:8px">发完等中继下一轮（默认 60 秒），到群里看一眼就知道了。</div>
+    </div>
+    <div class="card">
+      <h2>📤 待发队列（零备案通道）
+        <span class="row">
+          <button class="btn ghost small" onclick="loadOutbox()">🔄 刷新</button>
+        </span>
+      </h2>
+      <div class="muted" style="margin-bottom:10px;line-height:1.7">
+        服务器只负责入队；在你自己的 Windows 电脑上运行中继脚本，用<b>普通微信号</b>把消息发到指定群 —
+        不需要企业认证、可信域名、可信IP、ICP 备案。<br>
+        <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px">pip install wxauto requests</code>
+        &nbsp;然后&nbsp;
+        <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px">python wx_relay.py --server https://notification.hongquanquan.cn --token 你的令牌</code><br>
+        <span style="color:var(--warn)">注意：客户端自动化属于个人微信规范外操作，建议用小号并控制发送频率。</span>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <select id="ob_status" style="width:170px" onchange="loadOutbox()">
+          <option value="pending">pending（待发）</option>
+          <option value="">全部状态</option>
+          <option value="sent">sent（已发）</option>
+          <option value="failed">failed（失败）</option>
+        </select>
+        <span class="muted" id="ob_pager"></span>
+        <span class="row" style="margin-left:auto">
+          <button class="btn ghost small" onclick="obAction('retry','重发')">↻ 重发所选</button>
+          <button class="btn danger small" onclick="obAction('delete','删除')">🗑 删除所选</button>
+        </span>
+      </div>
+      <div style="overflow-x:auto"><table id="outboxTable"><thead>
+        <tr><th style="width:34px"></th><th>#</th><th>商户</th><th>目标群</th><th>状态</th><th>尝试</th><th>内容</th><th>创建时间</th><th>操作</th></tr>
       </thead><tbody></tbody></table></div>
     </div>
   </div>
@@ -291,10 +364,11 @@ function fallbackCopy(t, done) {
 
 function switchTab(btn, silent) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === btn));
-  ['merchants','orders','logs'].forEach(k => $('tab-' + k).classList.toggle('hidden', k !== btn.dataset.tab));
+  ['merchants','orders','logs','outbox'].forEach(k => $('tab-' + k).classList.toggle('hidden', k !== btn.dataset.tab));
   if (!silent) {
     if (btn.dataset.tab === 'orders') loadOrders();
     if (btn.dataset.tab === 'logs') { loadLogs(); loadStats(); }
+    if (btn.dataset.tab === 'outbox') { loadOutbox(); loadBinding(); }
   }
 }
 
@@ -302,14 +376,16 @@ function switchTab(btn, silent) {
 function renderGlobal(c) {
   $('g_key').value = c.douyin.client_key || '';
   $('g_secret').value = c.douyin.client_secret || '';
-  $('g_target').value = (c.wecom.target || 'internal');
+  $('g_target').value = (c.wecom.target || 'outbox');
   $('g_lookback').value = (c.sync && c.sync.lookback_minutes) || 60;
   $('g_phone').value = (c.douyin.phone_decrypt || 'local');
   $('g_perorder').value = String(!!(c.push && c.push.per_order));
   $('g_webhook').value = c.wecom.webhook_url || '';
+  $('g_wechat_group').value = c.wecom.wechat_group || '';
   $('g_corpid').value = c.wecom.corpid || '';
   $('g_wecom_secret').value = c.wecom.secret || '';
   $('g_fields').value = (c.push.fields || []).join(',');
+  $('g_privacy_kw').value = (c.wecom.privacy_multi_customer_keywords || []).join(', ');
   $('g_chats').value = (c.wecom.chat_id_list || []).join(',');
 }
 function collectGlobal() {
@@ -321,7 +397,10 @@ function collectGlobal() {
       phone_decrypt: $('g_phone').value },
     wecom: { ...CFG.wecom,
       target: $('g_target').value, webhook_url: $('g_webhook').value.trim(),
+      wechat_group: $('g_wechat_group').value.trim(),
+      test_group: $('g_test_group').value.trim(),
       corpid: $('g_corpid').value.trim(), secret: $('g_wecom_secret').value.trim(),
+      privacy_multi_customer_keywords: $('g_privacy_kw').value.split(/[,，\n]/).map(s => s.trim()).filter(Boolean),
       chat_id_list: $('g_chats').value.split(/[,\n]/).map(s => s.trim()).filter(Boolean) },
     push: { ...CFG.push, per_order: $('g_perorder').value === 'true',
       fields: $('g_fields').value.split(',').map(s => s.trim()).filter(Boolean) },
@@ -332,7 +411,7 @@ function collectGlobal() {
 async function saveGlobal() {
   CFG = collectGlobal();
   const j = await api('/api/config/save', {config: CFG});
-  j.ok ? toast('全局配置已保存 ✔') : toast('保存失败: ' + j.error, true);
+  j.ok ? toast('全局配置已保存 ✔' + rebindNote(j)) : toast('保存失败: ' + j.error, true);
   if (j.ok) load();
 }
 async function testDouyin() {
@@ -345,38 +424,54 @@ async function testDouyin() {
 /* ---------- 商户 ---------- */
 function merchantForm(m, i) {
   const w = m.wecom || {};
+  const SPARE = {
+    internal: '备用：企微内部群 Webhook',
+    customer_group: '备用：企微外部客户群群发（需认证备案 + 群主手动确认）',
+    both: '备用：内部群 + 客户群'
+  };
+  const spare = SPARE[w.target] ? `<option value="${w.target}" selected>${SPARE[w.target]}</option>` : '';
   return `
   <div class="merchant" data-i="${i}">
     <div class="head">
-      <b>🏪 ${esc(m.name || ('商户' + (i+1)))} <span class="muted">account_id: ${esc(m.account_id || '未填')}</span></b>
+      <b>🏪 ${esc(m.name || ('商户' + (i+1)))} <span class="muted">account_id: ${esc(m.account_id || '未填')}</span>
+        <span class="muted">→ 群「${esc(w.wechat_group || '未配置')}」</span></b>
       <span class="row">
+        <button class="btn small" onclick="pushMerchant(${i}, false)">🚀 推送</button>
         <button class="btn ghost small" onclick="preview(${i})">🔍 拉单预览</button>
         <button class="btn ghost small" onclick="pushMerchant(${i}, true)">🧪 推送测试</button>
-        <button class="btn small" onclick="pushMerchant(${i}, false)">🚀 推送</button>
-        <button class="btn ghost small" onclick="listGroups(${i})">👥 查客户群</button>
       </span>
     </div>
     <div class="grid">
       <div><label>商户名称</label><input class="m-name" value="${esc(m.name || '')}"></div>
       <div><label>来客商户根账户ID account_id</label><input class="m-account" value="${esc(m.account_id || '')}"></div>
-      <div><label>推送 target（留空=继承全局）</label>
-        <select class="m-target"><option value="">继承全局</option>
-          <option value="internal"${w.target==='internal'?' selected':''}>internal</option>
-          <option value="customer_group"${w.target==='customer_group'?' selected':''}>customer_group</option>
-          <option value="both"${w.target==='both'?' selected':''}>both</option>
+      <div><label>推送方式</label>
+        <select class="m-target"><option value="">继承全局（微信群里自动发送）</option>
+          <option value="outbox"${w.target==='outbox'?' selected':''}>outbox（微信群 · 全自动）</option>
+          ${spare}
         </select></div>
-      <div><label>该商户群 Webhook URL</label><input class="m-webhook" value="${esc(w.webhook_url || '')}"></div>
-      <div><label>企微 corpid（客户群用）</label><input class="m-corpid" value="${esc(w.corpid || '')}"></div>
-      <div><label>企微应用 Secret</label><input class="m-secret" type="password" value="${esc(w.secret || '')}"></div>
-      <div><label>群发执行成员 userid sender（可选）</label><input class="m-sender" value="${esc(w.sender || '')}"></div>
-      <div><label>客户群 chat_id_list（逗号分隔）</label><textarea class="m-chats">${esc((w.chat_id_list || []).join(','))}</textarea></div>
+      <div><label>微信接收群名称（必填，群被改名了就改这里 → 保存后队列里的旧群名会自动重绑定）</label><input class="m-wechat-group" value="${esc(w.wechat_group || '')}" placeholder="例如：玥笙-辽宁-大连中山店"></div>
+      <div class="muted" style="grid-column:1/-1">要收通知的那个微信群名 —— 企微里叫「外部客户群」的也是它，填法完全一样。群名拿不准就先跑 <code>python wx_relay.py --list-groups</code>，把真实会话名复制过来。</div>
     </div>
     <div class="row" style="margin-top:10px">
       <button class="btn small" onclick="saveMerchant(${i})">保存商户</button>
-      <button class="btn ghost small" onclick="testWecom(${i})">测试企微凭证</button>
+      <button class="btn ghost small" onclick="enqueue(${i})">📤 只入队（不等待中继）</button>
       <button class="btn danger small" onclick="delMerchant(${i})">删除</button>
       <span id="m_status_${i}"></span>
     </div>
+    <details style="margin-top:10px">
+      <summary class="muted" style="cursor:pointer">备用通道设置（企业认证 / 备案走通之后才需要）</summary>
+      <div class="grid" style="margin-top:10px">
+        <div><label>该商户群 Webhook URL</label><input class="m-webhook" value="${esc(w.webhook_url || '')}"></div>
+        <div><label>企微 corpid</label><input class="m-corpid" value="${esc(w.corpid || '')}"></div>
+        <div><label>企微应用 Secret</label><input class="m-secret" type="password" value="${esc(w.secret || '')}"></div>
+        <div><label>群发执行成员 userid sender（可选）</label><input class="m-sender" value="${esc(w.sender || '')}"></div>
+        <div style="grid-column:1/-1"><label>客户群 chat_id_list（逗号分隔）</label><textarea class="m-chats">${esc((w.chat_id_list || []).join(','))}</textarea></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost small" onclick="listGroups(${i})">👥 查企微客户群</button>
+        <button class="btn ghost small" onclick="testWecom(${i})">测试企微凭证</button>
+      </div>
+    </details>
   </div>`;
 }
 function renderMerchants() {
@@ -390,6 +485,7 @@ function collectMerchant(i) {
   const wecom = {};
   if (g('.m-target')) wecom.target = g('.m-target');
   if (g('.m-webhook')) wecom.webhook_url = g('.m-webhook');
+  if (g('.m-wechat-group')) wecom.wechat_group = g('.m-wechat-group');
   if (g('.m-corpid')) wecom.corpid = g('.m-corpid');
   if (g('.m-secret')) wecom.secret = g('.m-secret');
   if (g('.m-sender')) wecom.sender = g('.m-sender');
@@ -399,7 +495,8 @@ function collectMerchant(i) {
 }
 async function saveMerchant(i) {
   const j = await api('/api/merchant/save', {index: i, merchant: collectMerchant(i)});
-  if (j.ok) { toast('商户已保存 ✔'); await load(); loadMerchantsOptions(); } else toast('保存失败: ' + j.error, true);
+  if (j.ok) { toast('商户已保存 ✔' + rebindNote(j)); await load(); loadMerchantsOptions(); }
+  else toast('保存失败: ' + j.error, true);
 }
 async function delMerchant(i) {
   if (!confirm('确定删除该商户配置?')) return;
@@ -422,13 +519,26 @@ async function preview(i) {
   } catch(e) { setStatus(i, false, `<span class="status err">${esc(e.message)}</span>`); }
 }
 async function pushMerchant(i, dry) {
-  if (!dry && !confirm('确认真实推送到企业微信?')) return;
+  if (!dry && !confirm('确认真实推送? （target=outbox 时只会入待发队列，不会调用企业微信）')) return;
   setStatus(i, true, '<span class="status wait">执行中…</span>');
   try {
     const j = await api('/api/push', {merchant: mSpec(i), dry_run: dry,
       lookback_minutes: parseInt($('g_lookback').value) || null});
     show(j);
     setStatus(i, j.ok, j.ok ? `<span class="status ok">${dry ? '测试完成' : '推送完成'}（拉到 ${j.data.fetched} 单）</span>` : '<span class="status err">失败</span>');
+  } catch(e) { setStatus(i, false, `<span class="status err">${esc(e.message)}</span>`); }
+}
+async function enqueue(i) {
+  setStatus(i, true, '<span class="status wait">拉单入队中…</span>');
+  try {
+    const j = await api('/api/outbox/enqueue', {merchant: mSpec(i),
+      lookback_minutes: parseInt($('g_lookback').value) || null});
+    show(j);
+    if (j.ok) {
+      const ob = (j.data && j.data.outbox) || {};
+      setStatus(i, true, `<span class="status ok">已入队（拉到 ${j.data.fetched} 单，待发 ${ob.pending || 0} 条）</span>`);
+      loadOutbox();
+    } else setStatus(i, false, '<span class="status err">失败</span>');
   } catch(e) { setStatus(i, false, `<span class="status err">${esc(e.message)}</span>`); }
 }
 async function listGroups(i) {
@@ -475,6 +585,108 @@ async function loadOrders() {
 }
 function pageOrders(d) { ordersState.page = Math.max(1, ordersState.page + d); loadOrders(); }
 
+/* ---------- 待发队列(零备案通道) ---------- */
+let OB = [];
+function obStatusTag(s) { return s === 'sent' ? 'ok' : (s === 'failed' ? 'err' : 'info'); }
+function obRows(items) {
+  return items.map(it => `<tr>
+    <td><input type="checkbox" class="ob-chk" value="${it.id}"></td>
+    <td>${it.id}</td>
+    <td>${esc(it.merchant || '-')}</td>
+    <td class="wrap-cell">${esc(it.target || '-')}</td>
+    <td><span class="tag ${obStatusTag(it.status)}">${esc(it.status)}</span></td>
+    <td>${it.tries}${it.err ? ` <span class="muted" title="${esc(it.err)}">⚠</span>` : ''}</td>
+    <td class="wrap-cell" style="max-width:340px">${esc((it.content || '').slice(0, 140))}${(it.content || '').length > 140 ? '…' : ''}</td>
+    <td style="white-space:nowrap">${esc(it.created_at || '')}</td>
+    <td style="white-space:nowrap">
+      <button class="btn ghost small" onclick="obCopy(${it.id})">复制</button>
+      <button class="btn ghost small" onclick="obAction('retry','重发',[${it.id}])">重发</button>
+    </td></tr>`).join('');
+}
+async function loadOutbox() {
+  const p = new URLSearchParams({status: $('ob_status').value, page: 1, page_size: 100});
+  const j = await api('/api/outbox?' + p);
+  if (!j.ok) { toast('加载待发队列失败: ' + j.error, true); return; }
+  OB = (j.data && j.data.items) || [];
+  $('outboxTable tbody').innerHTML = OB.length ? obRows(OB)
+    : '<tr><td colspan="9" class="muted">队列为空。点商户卡上的「📤 只入队(零备案)」，或把 target 设为 outbox 后推送。</td></tr>';
+  $('ob_pager').textContent = `共 ${j.data.total} 条`;
+}
+function obSelected() { return Array.from(document.querySelectorAll('.ob-chk:checked')).map(c => Number(c.value)); }
+async function sendTest() {
+  const group = $('ob_test_group').value.trim();
+  const j = await api('/api/outbox/test', {group: group});
+  if (!j.ok) { toast('发送失败: ' + j.error, true); return; }
+  const d = j.data || {};
+  if (!d.enqueued) {
+    toast('这条测试消息已在队列里（队列会按内容去重），先删掉它再点一次', true);
+    loadOutbox(); return;
+  }
+  toast(`测试消息已入队 → 「${d.target}」（当前待发 ${d.pending} 条），等中继下一轮发出`);
+  $('ob_test_hint').innerHTML = `已入队 <b>${esc(d.target)}</b>。中继发出后，到群里看一眼就知道链路通不通；` +
+    `队列里那条「🧪【链路测试】」用完可以在下面删掉。`;
+  loadOutbox();
+}
+function obCopy(id) { const it = OB.find(x => x.id === id); if (it) copyText(it.content); }
+async function obAction(kind, label, ids) {
+  const list = ids || obSelected();
+  if (!list.length) { toast('请先勾选要' + label + '的消息', true); return; }
+  if (kind === 'delete' && !confirm(`确定删除 ${list.length} 条待发消息?`)) return;
+  const j = await api('/api/outbox/' + kind, {ids: list});
+  toast(j.ok ? `${label}成功（${list.length} 条）` : '失败: ' + j.error, !j.ok);
+  if (j.ok) loadOutbox();
+}
+
+/* ---------- 群绑定 / 群改名后的重新绑定 ---------- */
+let BIND = [];
+async function loadBinding() {
+  const j = await api('/api/group/binding');
+  if (!j.ok) { toast('检查群绑定失败: ' + j.error, true); return; }
+  BIND = (j.data && j.data.bindings) || [];
+  $('bindTable tbody').innerHTML = BIND.length ? BIND.map(bindRow).join('')
+    : '<tr><td colspan="5" class="muted">还没有商户。</td></tr>';
+}
+function bindRow(b, i) {
+  const stale = Object.entries(b.stale_targets || {});
+  const staleTxt = stale.length
+    ? stale.map(([t, v]) => `<code>${esc(t || '(空群名)')}</code> ×${v.total}`
+        + (v.failed ? `<span class="muted">（含失败 ${v.failed}）</span>` : '')).join('<br>')
+    : '<span class="muted">— 无残留</span>';
+  const btn = stale.length
+    ? `<button class="btn ghost small"${b.configured_group ? '' : ' disabled'} onclick="rebind(${i})">🔗 重新绑定</button>`
+    : '<span class="muted">—</span>';
+  return `<tr>
+    <td>${esc(b.merchant)}</td>
+    <td>${b.configured_group ? esc(b.configured_group) : '<span style="color:var(--warn)">未配置</span>'}</td>
+    <td>${b.ok_total || 0}</td>
+    <td class="wrap-cell" style="max-width:340px">${staleTxt}</td>
+    <td>${btn}</td></tr>`;
+}
+async function rebind(i) {
+  const b = BIND[i];
+  if (!b) return;
+  const j = await api('/api/outbox/rebind', {merchant: b.merchant});
+  toast(j.ok ? `已重新绑定 ${j.data.rebound.updated} 条 → 「${j.data.rebound.to}」` : '失败: ' + j.error, !j.ok);
+  if (j.ok) { loadBinding(); loadOutbox(); }
+}
+async function rebindAll() {
+  const todo = BIND.filter(b => b.stale_total && b.configured_group);
+  if (!todo.length) { toast('没有需要重新绑定的商户'); return; }
+  if (!confirm(`将把 ${todo.length} 个商户队列里的旧群名改指到各自当前配置的群名，并重发失败的消息，继续？`)) return;
+  let n = 0, bad = 0;
+  for (const b of todo) {
+    const j = await api('/api/outbox/rebind', {merchant: b.merchant});
+    if (j.ok) n += (j.data.rebound.updated || 0); else bad++;
+  }
+  toast(`重新绑定完成：共改指 ${n} 条${bad ? `，${bad} 个商户失败` : ''}`, !!bad);
+  loadBinding(); loadOutbox();
+}
+function rebindNote(j) {
+  const rbs = (j && j.data && j.data.rebinds) || [];
+  if (!rbs.length) return '';
+  return `；群名已重绑定 ${rbs.reduce((a, r) => a + r.updated, 0)} 条队列消息 → 「${rbs[0].to}」`;
+}
+
 /* ---------- 运行日志 ---------- */
 function logRows(logs) {
   return logs.map(l => `<tr>
@@ -499,9 +711,11 @@ async function loadStats() {
   const j = await api('/api/stats');
   if (!j.ok) return;
   const d = j.data;
+  const ob = d.outbox || {};
   $('statCards').innerHTML = `
     <div class="stat"><b>${(d.orders_by_merchant || []).reduce((s, x) => s + x.n, 0)}</b><span>订单库总量</span></div>
     ${(d.orders_by_merchant || []).map(x => `<div class="stat"><b>${x.n}</b><span>${esc(x.merchant_name || x.account_id)}</span></div>`).join('')}
+    <div class="stat"><b>${ob.pending || 0}</b><span>待发队列</span></div>
     <div class="stat"><b>${d.logs_today}</b><span>今日操作</span></div>
     <div class="stat"><b style="color:${d.errors_today ? 'var(--danger)' : 'inherit'}">${d.errors_today}</b><span>今日错误</span></div>`;
 }
