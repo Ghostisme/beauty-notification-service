@@ -190,7 +190,16 @@ class WeChatSender:
         target = (target or "").strip()
         if not target:
             raise RuntimeError("未配置接收群名称")
-        resolved = self.resolve(target)
+        try:
+            resolved = self.resolve(target)
+        except RuntimeError as e:
+            # 会话列表里没有, 但群可能真实存在(独立聊天窗口/列表只渲染前N条)。
+            # wechatauto 的 ChatWith 走搜索框, 不依赖会话列表 —— 降级为"搜索+群类型校验"。
+            if self.backend == "wechatauto" and "找不到" in str(e):
+                log(f"⚠ 会话列表没有「{target}」, 改用搜索方式打开(带群类型校验)")
+                self._send_via_search(target, content)
+                return
+            raise
         result = self.wx.ChatWith(resolved)
         time.sleep(0.5)
         # wechatauto 的 ChatWith 失败返回 None; wxauto 失败直接抛异常
@@ -220,6 +229,37 @@ class WeChatSender:
                     pass
         if current and str(resolved) not in str(current):
             raise RuntimeError(f"未找到群「{resolved}」(当前会话为「{current}」), 请核对群名称")
+        self.wx.SendMsg(content)
+        time.sleep(1.0)
+        self._verify_sent(content)
+
+    def _send_via_search(self, target, content):
+        """会话列表预检失败时的降级发送: 搜索框精确打开 → 校验群类型与名字 → 发送。
+
+        校验失败一律中止并抛错(触发回报 failed), 宁可失败不可发错群。
+        """
+        result = self.wx.ChatWith(target, exact=True)
+        time.sleep(0.5)
+        if not result:
+            raise RuntimeError(
+                f"搜索打开「{target}」失败 —— 该名下没有完全匹配的会话。"
+                f"请核对群名(空格/emoji/括号), 并确认本微信号还在群里")
+        info_fn = getattr(self.wx, "ChatInfo", None)
+        if callable(info_fn):
+            try:
+                info = info_fn() or {}
+                cname = str(info.get("chat_name") or "")
+                ctype = str(info.get("chat_type") or "")
+                if ctype and ctype != "group":
+                    raise RuntimeError(
+                        f"「{target}」命中的不是群聊(识别为 {ctype}), 为防发错人已中止发送")
+                if cname and target not in cname and cname not in target:
+                    raise RuntimeError(
+                        f"搜索命中的会话是「{cname}」而非「{target}」, 已中止发送")
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
         self.wx.SendMsg(content)
         time.sleep(1.0)
         self._verify_sent(content)
