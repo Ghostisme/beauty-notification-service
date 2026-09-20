@@ -156,6 +156,7 @@
 
     <div class="card">
       <h2>③ 拉单预览 / 推送结果</h2>
+      <div id="msgs" class="hidden"></div>
       <pre id="out">点商户卡上的「拉单预览」或「推送」，结果会显示在这里。</pre>
     </div>
   </div>
@@ -247,10 +248,45 @@ function setToken() {
   toast('令牌已保存到本机浏览器');
 }
 function show(j) {
+  // 消息文案面板: 支持一键复制, 用于「企业微信群发助手」手动发送(无需可信域名/备案)
+  const raw = j && j.data && Array.isArray(j.data.messages) ? j.data.messages : [];
+  const msgs = raw.map(m => (m && typeof m === 'object') ? (m.markdown ? m.markdown.content : JSON.stringify(m)) : String(m));
+  const box = $('msgs');
+  if (msgs.length) {
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="muted" style="margin-bottom:8px">消息文案（点「复制文案」→ 企业微信手机端「客户群 → 群发助手」粘贴发送）</div>'
+      + msgs.map((m, k) =>
+        '<div style="border:1px solid #e3e6ea;border-radius:8px;padding:10px;margin-bottom:8px;background:#fafbfc">'
+        + '<pre style="margin:0 0 8px;white-space:pre-wrap;font-size:13px;line-height:1.6;font-family:inherit">' + esc(m) + '</pre>'
+        + '<button class="btn ghost small" data-copy="' + k + '">📋 复制文案</button></div>').join('');
+    box.querySelectorAll('[data-copy]').forEach(b => {
+      b.onclick = () => copyText(msgs[+b.dataset.copy]);
+    });
+  } else {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+  }
   let text = JSON.stringify(j, null, 2);
   if (j.log) text = '— 运行日志 —\n' + j.log + '\n\n' + text;
   $('out').textContent = text;
   switchTab(document.querySelector('[data-tab="merchants"]'), true);
+}
+
+function copyText(t) {
+  const done = () => toast('文案已复制 ✔');
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(t).then(done).catch(() => fallbackCopy(t, done));
+  } else fallbackCopy(t, done);
+}
+function fallbackCopy(t, done) {
+  const ta = document.createElement('textarea');
+  ta.value = t;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败, 请手动选中复制', true); }
+  document.body.removeChild(ta);
 }
 
 function switchTab(btn, silent) {
