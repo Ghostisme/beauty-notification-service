@@ -9,3 +9,6 @@ __pycache__/
 venv/
 node_modules/
 .env
+# 本地打包产物 / 服务器上的自动备份，都不进仓库
+dist/
+backups/
