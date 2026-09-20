@@ -291,7 +291,8 @@
 let CFG = null, token = localStorage.getItem('admin_token') || '';
 let ordersState = { page: 1 }, logsState = { page: 1 };
 
-const $ = id => document.getElementById(id);
+// 兼容两种用法: $('纯id') 走 getElementById; $('table tbody') 等选择器走 querySelector
+const $ = sel => /^[A-Za-z0-9_\-\u4e00-\u9fff]+$/.test(sel) ? document.getElementById(sel) : document.querySelector(sel);
 function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
 function toast(msg, isErr) {
   const t = $('toast');
