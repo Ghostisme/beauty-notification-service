@@ -16,7 +16,9 @@
       POST /api/outbox/ack              → 回报成功/失败(失败会自动重试, 最多5次)
 
 用法:
-  pip install wxauto requests
+  微信 3.9.x:  pip install wxauto requests          (wxauto 已从 PyPI 下架, 装  pip install git+https://github.com/cluic/wxauto.git)
+  微信 4.x  :  pip install wechatauto-replica requests
+  脚本自动探测: 优先 wxauto, 初始化失败自动切 wechatauto-replica, 无需手动选择。
   python wx_relay.py --server https://notification.hongquanquan.cn --token 你的ADMIN_TOKEN
   python wx_relay.py --server ... --token ... --once          # 只跑一轮(调试)
   python wx_relay.py --server ... --token ... --dry-run       # 只打印不发送
@@ -64,18 +66,38 @@ def log(msg):
 # ---------------- 微信客户端封装 ----------------
 
 class WeChatSender:
-    """用 wxauto(UIAutomation) 驱动微信 PC 客户端。不做内存注入, 相对温和。"""
+    """驱动微信 PC 客户端发送消息。不做内存注入, 相对温和。
+
+    双后端自动探测:
+      - wxauto            → 微信 3.9.x (UIAutomation 控件树)
+      - wechatauto-replica → 微信 4.x   (微信4.1.12+ 把 UIA 树关了, 该库用 UIA热激活+OCR 兜底)
+    """
 
     def __init__(self):
+        errors = []
+        # 后端1: wxauto (微信 3.9.x)
         try:
             from wxauto import WeChat
-        except ImportError:
-            sys.exit("缺少依赖: 请先执行  pip install -U wxauto requests")
-        try:
             self.wx = WeChat()
+            self.backend = "wxauto"
+            log("微信客户端已就绪 ✔ (后端: wxauto, 适配微信 3.9.x)")
+            return
+        except ImportError as e:
+            errors.append(f"wxauto 未安装({e})")
         except Exception as e:
-            sys.exit(f"未找到微信 PC 客户端窗口, 请先登录并保持微信运行。原始错误: {e}")
-        log("微信客户端已就绪 ✔")
+            errors.append(f"wxauto 初始化失败({e})")
+        # 后端2: wechatauto-replica (微信 4.x)
+        try:
+            from wechatauto import WeChat
+            self.wx = WeChat()
+            self.backend = "wechatauto"
+            log("微信客户端已就绪 ✔ (后端: wechatauto-replica, 适配微信 4.x)")
+            return
+        except ImportError:
+            errors.append("wechatauto-replica 未安装 —— 微信4.x 需要: pip install wechatauto-replica")
+        except Exception as e:
+            errors.append(f"wechatauto 初始化失败({e})")
+        sys.exit("未能连接微信 PC 客户端, 请先登录并保持微信运行。原因:\n  " + "\n  ".join(errors))
 
     # ---- 会话列表 ----
 
@@ -101,12 +123,19 @@ class WeChatSender:
                 if isinstance(it, str):
                     names.append(it)
                 elif isinstance(it, dict):
-                    for key in ("name", "Name", "nickname", "nickName", "昵称"):
+                    for key in ("name", "Name", "nickname", "nickName", "chat_name", "昵称"):
                         if it.get(key):
                             names.append(str(it[key]))
                             break
                 else:
-                    names.append(str(it))
+                    # wechatauto 的 SessionItem 等对象: 先取 name 属性, 再兜底 str()
+                    got = None
+                    for attr in ("name", "Name", "nickname", "nickName"):
+                        v = getattr(it, attr, None)
+                        if isinstance(v, str) and v.strip():
+                            got = v
+                            break
+                    names.append(got if got is not None else str(it))
             if names:
                 return names
         log("⚠ 当前 wxauto 版本不支持读取会话列表, 跳过群名预检(仅按名称直接切换)")
@@ -162,8 +191,24 @@ class WeChatSender:
         if not target:
             raise RuntimeError("未配置接收群名称")
         resolved = self.resolve(target)
-        self.wx.ChatWith(resolved)
+        result = self.wx.ChatWith(resolved)
         time.sleep(0.5)
+        # wechatauto 的 ChatWith 失败返回 None; wxauto 失败直接抛异常
+        if result is None:
+            raise RuntimeError(f"未找到群「{resolved}」, 请核对群名称(可用 --list-groups 对照)")
+        # wechatauto: 用 ChatInfo 校验当前会话, 顺带确认是群聊(防发错人)
+        info_fn = getattr(self.wx, "ChatInfo", None)
+        if callable(info_fn):
+            try:
+                info = info_fn() or {}
+                cname = str(info.get("chat_name") or "")
+                if cname and str(resolved) not in cname and cname not in str(resolved):
+                    raise RuntimeError(f"未找到群「{resolved}」(当前会话为「{cname}」), 请核对群名称")
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
+        # wxauto: 兼容旧校验路径
         current = None
         for attr in ("CurrentChat",):
             fn = getattr(self.wx, attr, None)
