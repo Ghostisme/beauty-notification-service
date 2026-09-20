@@ -238,6 +238,7 @@ class WeChatSender:
 
         校验失败一律中止并抛错(触发回报 failed), 宁可失败不可发错群。
         """
+        log(f"搜索打开「{target}」中…(首次会触发布局校准, 可能需要 1-2 分钟, 请耐心等待勿中断)")
         result = self.wx.ChatWith(target, exact=True)
         time.sleep(0.5)
         if not result:
