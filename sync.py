@@ -286,16 +286,30 @@ def fetch_orders_api(cfg, merchant, token, lookback_minutes=None):
 
 
 def map_api_order(o):
-    """把接口返回的订单字段映射成内部统一结构(字段名以官方文档为准, 此处做兼容)。"""
+    """把接口返回的订单字段映射成内部统一结构。
+    兼容两代结构: 来客 v1 真实返回(goods列表/contacts列表/order_sale_info) + 旧文档示例字段。"""
     sku = o.get("sku_info") or o.get("sku") or {}
+    goods_list = [g for g in (o.get("goods") or []) if isinstance(g, dict)]
+    goods_names = [g.get("sku_name") or g.get("name") or g.get("title") or "" for g in goods_list]
+    goods_names = [n for n in goods_names if n]
+    contacts = [c for c in (o.get("contacts") or []) if isinstance(c, dict)]
+    phone_masked = (contacts[0].get("phone") or "") if contacts else ""
+    merchant_info = o.get("merchant_info") or {}
+    poi = o.get("poi") or {}
     return {
         "order_id": o.get("order_id") or o.get("orderId") or o.get("id"),
-        "goods": o.get("title") or o.get("goods_name") or sku.get("title") or sku.get("name"),
-        "amount": o.get("pay_amount") or o.get("amount") or o.get("order_amount"),
+        "goods": "、".join(goods_names) or o.get("title") or o.get("goods_name")
+                 or sku.get("title") or sku.get("name"),
+        "amount": o.get("pay_amount") or o.get("amount") or o.get("order_pay_amount") or o.get("order_amount"),
         "status": o.get("order_status") or o.get("status") or o.get("status_str"),
-        "customer": o.get("buyer_nick") or o.get("customer_name") or (o.get("buyer_info") or {}).get("nick_name"),
-        "created_at": o.get("create_time") or o.get("created_at") or o.get("pay_time"),
-        "shop": o.get("shop_name") or o.get("store_name"),
+        "customer": (contacts[0].get("name") if contacts else None)
+                    or o.get("buyer_nick") or o.get("customer_name")
+                    or (o.get("buyer_info") or {}).get("nick_name"),
+        "created_at": o.get("create_time") or o.get("create_order_time")
+                      or o.get("created_at") or o.get("pay_time"),
+        "shop": o.get("shop_name") or o.get("store_name")
+                or poi.get("poi_name") or merchant_info.get("account_name"),
+        "phone": phone_masked,  # 默认展示打码号; 有加密串时 attach_phone 会解密覆盖
         "_raw": o,  # 保留原始结构, 供手机号提取用
     }
 
