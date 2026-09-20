@@ -1,5 +1,15 @@
 # 服务器部署指南
 
+> **本文是「裸机从头装一遍」的完整说明**（装 Docker、配 nginx、首次上线）。
+> 日常**更新代码**不要看这里，看 **`操作手册.md` 第 7 章**：
+> 本地 `python tools/release.py` 打包 → `scp` 上传 → 服务器 `bash tools/remote-deploy.sh` 解压重建。
+> 这样服务器**完全不需要访问 GitHub**（国内直连很慢）。
+> 中继（把消息真正发进微信群的程序）见 **`操作手册.md` 第 8 章**。
+>
+> 注：本文早期版本把项目目录写成 `/opt/dylk-wecom-sync`，实际部署目录是
+> **`/opt/beauty-notification-service`**（`deploy.sh` 会 clone 到这里）。
+> 拿不准时用 `docker inspect dylk-admin --format '{{ range .Mounts }}{{ .Source }}{{ "\n" }}{{ end }}'` 确认。
+
 目标服务器：**Ubuntu 24.04（公网 IP 47.103.32.12，已装全局 nginx）**
 
 最终架构：
