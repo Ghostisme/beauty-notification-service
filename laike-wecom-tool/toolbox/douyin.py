@@ -1,10 +1,15 @@
+import base64
 import copy
 import threading
 import time
+from collections import OrderedDict
+
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 import requests
 
-from .domain import error_text
+from .domain import error_text, full_phone, public_phone, time_text
 
 
 class PlatformError(RuntimeError):
@@ -19,10 +24,14 @@ class DouyinClient:
     def __init__(self, db, session=None):
         self.db = db
         self.session = session or requests.Session()
+        if session is None:
+            # 平台使用出口 IP 白名单；不继承桌面代理而切换到另一公网出口。
+            self.session.trust_env = False
         self._token = ""
         self._expires = 0
         self._identity = None
         self._lock = threading.RLock()
+        self._decrypt_cache = OrderedDict()
 
     @staticmethod
     def unpack(body):
@@ -140,6 +149,115 @@ class DouyinClient:
             raise RuntimeError("订单响应包含无效记录，已保留本企业同步游标")
         return items
 
+    def clues(self, account_id, start, end, max_pages=50):
+        """客资中心真实线索；与订单游标分开推进，不能用订单代替留资。"""
+        if not start < end or end - start > 365 * 86400:
+            raise ValueError("线索查询时间窗必须递增且不超过 365 天")
+        path = self.db.settings("douyin")["clue_path"]
+        seen, fetched = set(), 0
+        for page in range(1, min(max_pages, 100) + 1):
+            data = self.request("GET", path, account_id, params={
+                "account_id": str(account_id), "start_time": time_text(start), "end_time": time_text(end),
+                "page": page, "page_size": 100})
+            items = data.get("clue_data")
+            if not isinstance(items, list) or any(not isinstance(x, dict) for x in items):
+                raise RuntimeError("线索响应缺少有效 clue_data 数组，已保留线索游标")
+            for item in items:
+                key = str(item.get("clue_id") or "")
+                if not key or key in seen:
+                    raise RuntimeError("线索编号缺失或分页重复，已保留线索游标")
+                seen.add(key)
+                yield item
+            fetched += len(items)
+            info = data.get("page") if isinstance(data.get("page"), dict) else {}
+            total = info.get("total")
+            if not items or (total is not None and fetched >= int(total)):
+                return
+            if total is None and len(items) < 100:
+                return
+        raise RuntimeError("本轮达到线索分页上限，已保留线索游标；请缩短查询时间窗")
+
+    def decrypt_values(self, values, account_id):
+        """按已实测的 cipher_texts / results 协议解密，核对逐条成功状态。"""
+        values = list(dict.fromkeys(v for v in values if isinstance(v, str) and v.startswith("Enc.")))
+        cfg = self.db.settings("douyin")
+        identity = (cfg["client_key"], self.db.secret("douyin_secret"), cfg["base_url"], cfg["decrypt_path"])
+        mapping, errors, pending = {}, [], []
+        with self._lock:
+            for value in values:
+                cached = self._decrypt_cache.get((identity, str(account_id), value))
+                if cached and cached[0] > time.monotonic():
+                    mapping[value] = cached[1]
+                else:
+                    pending.append(value)
+        for offset in range(0, len(pending), 50):
+            batch = pending[offset:offset + 50]
+            try:
+                data = self.request("POST", cfg["decrypt_path"], account_id,
+                                    body={"account_id": str(account_id), "cipher_texts": batch})
+                results = data.get("results")
+                if not isinstance(results, list):
+                    raise RuntimeError("解密接口未返回 results 数组")
+                by_cipher = {}
+                for row in results:
+                    if not isinstance(row, dict) or row.get("cipher_text") not in batch:
+                        continue
+                    key = row["cipher_text"]
+                    if key in by_cipher:
+                        raise RuntimeError("解密接口返回重复密文结果")
+                    by_cipher[key] = row
+                for value in batch:
+                    row = by_cipher.get(value, {})
+                    if row.get("is_success") is True and isinstance(row.get("plain_text"), str):
+                        mapping[value] = row["plain_text"]
+                        with self._lock:
+                            key = (identity, str(account_id), value)
+                            self._decrypt_cache[key] = (time.monotonic() + 3600, row["plain_text"])
+                            self._decrypt_cache.move_to_end(key)
+                            while len(self._decrypt_cache) > 1024:
+                                self._decrypt_cache.popitem(last=False)
+                    else:
+                        errors.append("有字段未能解密（错误码 " + str(row.get("error_code", "结果缺失")) + "）")
+            except Exception as exc:
+                errors.append(error_text(exc, (self._token, self.db.secret("douyin_secret"))))
+        return mapping, "; ".join(dict.fromkeys(errors))[:1500]
+
+    @staticmethod
+    def decrypt_legacy(value, secret):
+        """官方旧版 AES-CBC：补齐/左右裁剪至32字节，IV取后16字节。"""
+        key = secret.encode("utf-8")
+        if len(key) < 32:
+            missing = 32 - len(key)
+            key = b"#" * ((missing + 1) // 2) + key + b"#" * (missing // 2)
+        elif len(key) > 32:
+            left = (len(key) - 32 + 1) // 2
+            key = key[left:left + 32]
+        cipher = base64.b64decode(value, validate=True)
+        decryptor = Cipher(algorithms.AES(key), modes.CBC(key[16:])).decryptor()
+        padded = decryptor.update(cipher) + decryptor.finalize()
+        unpadder = padding.PKCS7(128).unpadder()
+        return (unpadder.update(padded) + unpadder.finalize()).decode("utf-8")
+
+    def decrypt_clues(self, records, account_id):
+        result = copy.deepcopy(records)
+        if not self.db.settings("douyin")["decrypt_enabled"]:
+            for row in result:
+                row["phone"] = ""
+            return result, "完整手机号解密未开启"
+        values = [row.get("enc_telephone") for row in result]
+        mapping, warning = self.decrypt_values(values, account_id)
+        errors = [warning] if warning else []
+        for row in result:
+            enc, legacy = row.get("enc_telephone"), row.get("telephone")
+            phone = mapping.get(enc, "")
+            if not enc and legacy:
+                try:
+                    phone = public_phone(legacy) or self.decrypt_legacy(legacy, self.db.secret("douyin_secret"))
+                except Exception:
+                    errors.append("有旧版线索联系电话未能解密")
+            row["phone"] = full_phone(phone) or public_phone(phone)
+        return result, "; ".join(dict.fromkeys(errors))[:1500]
+
     def decrypt_orders(self, orders, account_id):
         """仅调用平台批量解密能力；没有权限时保留原值并返回可查看的错误。"""
         result = copy.deepcopy(orders)
@@ -157,20 +275,8 @@ class DouyinClient:
                     if isinstance(value, str) and value.startswith("Enc."):
                         fields.append((holder, key, value))
         values = list(dict.fromkeys(value for _, _, value in fields))
-        mapping, errors = {}, []
-        for offset in range(0, len(values), 50):
-            try:
-                body = {"account_id": str(account_id), "encrypted_data_list": values[offset:offset + 50]}
-                data = self.request("POST", self.db.settings("douyin")["decrypt_path"], account_id, body=body)
-                entries = data.get("decrypted_data_list")
-                if not isinstance(entries, list):
-                    raise RuntimeError("解密接口未返回 decrypted_data_list")
-                for row in entries:
-                    if isinstance(row, dict) and row.get("encrypted_data") in values and isinstance(row.get("decrypted_data"), str):
-                        mapping[row["encrypted_data"]] = row["decrypted_data"]
-            except Exception as e:
-                errors.append(error_text(e, (self._token, self.db.secret("douyin_secret"))))
+        mapping, warning = self.decrypt_values(values, account_id)
         for holder, key, value in fields:
             if mapping.get(value):
                 holder[key] = mapping[value]
-        return result, "; ".join(errors)[:1500]
+        return result, warning

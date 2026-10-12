@@ -3,7 +3,7 @@ import hashlib
 import json
 import time
 
-from .domain import error_text, normalize_order
+from .domain import error_text, full_phone, normalize_order
 
 
 def identity(db, account_id=""):
@@ -63,10 +63,10 @@ def check_douyin(db, client, enterprise_id=None):
                 raise ValueError("平台返回订单的商户账号与当前企业不一致")
             order = normalize_order(raw, cfg["amount_unit"])
             for field, name in (("poi_id", "with_store"), ("phone", "with_phone"), ("goods", "with_package")):
-                metrics[name] += bool(order[field])
+                metrics[name] += bool(full_phone(order[field])) if field == "phone" else bool(order[field])
         detail = f"真实订单查询成功，本次返回 {len(records)} 条样本；未写入订单、未生成通知"
         if records:
-            detail += f"。含门店 {metrics['with_store']} 条、可用手机号 {metrics['with_phone']} 条、套餐 {metrics['with_package']} 条（未执行解密）"
+            detail += f"。含门店 {metrics['with_store']} 条、完整手机号 {metrics['with_phone']} 条、套餐 {metrics['with_package']} 条（未执行解密，打码号码不计入完整号码）"
         else:
             detail += "。当前时间窗无订单，字段可用性需在有真实订单后核对"
         return save_check(db, key, "ready", detail, fingerprint, metrics)
@@ -108,11 +108,17 @@ def report(db, demo=False):
     bound = [s for s in stores if s["group_id"] and s["group_name"]]
     add("routing", "正式门店与群匹配", "ready" if stores and len(bound) == len(stores) else "unconfigured",
         f"{len(bound)} / {len(stores)} 家正式门店已绑定接收群；需与真实订单里的门店 ID 核对")
-    lead = db.settings("connection_check_lead_ingest")
-    detail = "独立抖音留资的数据源尚待接入；已有标准接收接口和手工录入"
-    if lead.get("checked_at"):
-        detail += "。最近收到外部留资接口请求：" + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(lead["checked_at"] + 28800)) + "（仍需核对上游来源）"
-    add("leads", "独立留资自动获取", "unconfigured", detail, lead.get("checked_at"))
+    if cfg["clue_enabled"]:
+        for enterprise in enterprises:
+            check = current_check(db, "clues_" + str(enterprise["id"]), identity(db, enterprise["account_id"]))
+            add("clues_" + str(enterprise["id"]), "线索与完整手机号 · " + enterprise["name"],
+                **{k: check[k] for k in ("state", "detail", "checked_at")})
+    else:
+        lead = db.settings("connection_check_lead_ingest")
+        detail = "客资中心线索同步尚未开启；已有标准接收接口和手工录入"
+        if lead.get("checked_at"):
+            detail += "。最近收到外部留资接口请求：" + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(lead["checked_at"] + 28800)) + "（仍需核对上游来源）"
+        add("leads", "独立留资自动获取", "unconfigured", detail, lead.get("checked_at"))
     channel = db.settings("channel")
     if channel["mode"] == "relay":
         workers = db.rows("SELECT * FROM relay_workers WHERE last_seen>? ORDER BY last_seen DESC", (time.time() - 45,))

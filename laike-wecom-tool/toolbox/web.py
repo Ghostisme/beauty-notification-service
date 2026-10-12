@@ -380,7 +380,7 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
         clean = {**current, **{k: v for k, v in data.items() if k in SETTINGS[section]}}
         ranges = {"interval_seconds": (30, 86400), "lookback_minutes": (5, 10080), "max_age_minutes": (1, 10080),
                   "max_pages": (1, 1000), "history_days": (7, 3650), "timeout_seconds": (5, 60),
-                  "max_attempts": (1, 10), "lease_seconds": (60, 900)}
+                  "max_attempts": (1, 10), "lease_seconds": (60, 900), "clue_lookback_days": (1, 730)}
         for key, value in clean.items():
             if key in ranges:
                 lo, hi = ranges[key]
@@ -400,11 +400,13 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
                 clean[key] = [integer(v, 0, 99999, key) for v in clean[key]]
         if section == "douyin":
             clean["base_url"] = url(clean["base_url"])
-            for key in ("order_path", "decrypt_path"):
+            for key in ("order_path", "decrypt_path", "clue_path"):
                 if not isinstance(clean[key], str) or not clean[key].startswith("/") or "?" in clean[key] or len(clean[key]) > 500:
                     raise ValueError("接口路径必须以 / 开头")
             if clean["amount_unit"] not in ("fen", "yuan"):
                 raise ValueError("金额单位仅支持 fen/yuan")
+            if clean["clue_enabled"] and not clean["decrypt_enabled"]:
+                raise ValueError("同步客资中心完整号码需要同时开启平台手机号解密")
             clean["client_key"] = text(clean["client_key"], 200)
             if data.get("client_secret"):
                 db.set_secret("douyin_secret", text(data["client_secret"], 1000))
@@ -446,9 +448,9 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
                 args.append(value)
         keyword = text(request.args.get("keyword"), 100)
         if keyword:
-            where.append("(e.record_id LIKE ? ESCAPE '\\' OR m.group_name LIKE ? ESCAPE '\\' OR m.body LIKE ? ESCAPE '\\')")
+            where.append("(e.record_id LIKE ? ESCAPE '\\' OR m.group_name LIKE ? ESCAPE '\\' OR m.body LIKE ? ESCAPE '\\' OR json_extract(e.payload,'$.order_id') LIKE ? ESCAPE '\\')")
             pattern = "%" + keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            args.extend([pattern] * 3)
+            args.extend([pattern] * 4)
         clause = " WHERE " + " AND ".join(where) if where else ""
         base = " FROM messages m JOIN events e ON e.id=m.event_id JOIN enterprises n ON n.id=m.enterprise_id LEFT JOIN stores s ON s.id=m.store_id"
         total = db.one("SELECT COUNT(*) AS n" + base + clause, args)["n"]

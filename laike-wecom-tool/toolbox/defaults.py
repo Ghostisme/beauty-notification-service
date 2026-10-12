@@ -45,12 +45,14 @@ VARIABLES = ["门店名称", "企业名称", "客户称呼", "客户手机号", 
 SETTINGS = {
     "scheduler": {"enabled": False, "interval_seconds": 120, "lookback_minutes": 30,
                   "max_age_minutes": 180, "max_pages": 50, "history_days": 90},
-    "notifications": {"delivery_enabled": False, "order_trigger": "paid",
+    "notifications": {"delivery_enabled": False, "order_trigger": "paid", "require_full_phone": False,
                       "status_events": ["verified", "refunded", "canceled"],
                       "verified_statuses": [401], "refunded_statuses": [301], "refunding_statuses": [300]},
     "douyin": {"base_url": "https://open.douyin.com", "client_key": "",
                "order_path": "/goodlife/v1/trade/order/query/", "decrypt_enabled": False,
-               "decrypt_path": "/goodlife/v1/open/common_biz/crypto/decrypt/batch", "amount_unit": "fen"},
+               "decrypt_path": "/goodlife/v1/open/common_biz/crypto/decrypt/batch/", "amount_unit": "fen",
+               "clue_enabled": False, "clue_lookback_days": 180,
+               "clue_path": "/goodlife/v1/open_api/crm/clue/query/"},
     "channel": {"mode": "relay", "http_url": "", "timeout_seconds": 20,
                 "interval_seconds": 3, "max_attempts": 5, "lease_seconds": 180},
 }
@@ -58,7 +60,7 @@ SETTINGS = {
 STATUS_LABELS = {"pending": "待发送", "sending": "发送中", "waiting_receipt": "等待回执",
                  "sent": "已发送", "failed": "发送失败", "uncertain": "待人工核实",
                  "unrouted": "待分配门店", "blocked": "门店或企业已暂停", "muted": "通知已关闭",
-                 "skipped_old": "历史记录", "canceled": "已取消"}
+                 "skipped_old": "历史记录", "canceled": "已取消", "waiting_phone": "待补全手机号"}
 
 ORDER_STATUSES = {"0": "初始化", "100": "待支付", "101": "支付取消", "200": "已支付",
                   "201": "待使用", "1": "已完成", "150": "部分支付"}

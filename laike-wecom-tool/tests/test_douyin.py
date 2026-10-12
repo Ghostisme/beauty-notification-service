@@ -75,10 +75,11 @@ def test_expired_token_refreshes_once_and_merchant_header(db, monkeypatch):
 def test_official_batch_decrypt_no_local_ciphertext_fallback(db, order):
     db.set_settings('douyin',{**db.settings('douyin'),'decrypt_enabled':True})
     client=DouyinClient(db)
-    client.request=lambda *a,**k:{'decrypted_data_list':[{'encrypted_data':'Enc.not-a-phone','decrypted_data':'13800000000'}]}
+    client.request=lambda *a,**k:{'results':[{'cipher_text':'Enc.not-a-phone','plain_text':'13800000000','is_success':True}]}
     records,warning=client.decrypt_orders([order],'1001')
     assert normalize_order(records[0])['phone']=='13800000000' and not warning
     assert order['contacts'][0]['phone_encrypt']=='Enc.not-a-phone'
+    client._decrypt_cache.clear()
     def fail(*args,**kwargs):raise PlatformError(2119005,'未授权')
     client.request=fail
     records,warning=client.decrypt_orders([order],'1001')

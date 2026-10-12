@@ -9,7 +9,8 @@ import requests
 from .db import dumps
 from .connections import identity, save_check
 from .defaults import EVENT_NAMES, ORDER_STATUSES
-from .domain import epoch, error_text, event_key, normalize_order, public_phone, render, text
+from .domain import (epoch, error_text, event_key, full_phone, normalize_clue, normalize_order,
+                     phone_state, public_phone, render, text)
 from .douyin import DouyinClient
 
 
@@ -71,6 +72,8 @@ class Engine:
             status = "blocked"
         elif not store or not store["group_id"] or not store["group_name"]:
             status, error = "unrouted", "未找到本企业内门店的完整群绑定，请手动分配"
+        if status == "pending" and not is_test and self.db.settings("notifications")["require_full_phone"] and not full_phone(payload.get("phone")):
+            status, error = "waiting_phone", "尚未取得完整手机号；等待线索补全或后台手动补录"
         body = render(template, payload, enterprise["name"], store["name"] if store else "")
         if is_test:
             body = "【发送链路测试｜模拟数据】\n" + body
@@ -102,6 +105,75 @@ class Engine:
             self.db.audit("创建测试消息", result["message_id"], category, c)
         return {**result, "record_id": identifier}
 
+    def _attach_phone(self, c, enterprise_id, payload, category="new_order"):
+        payload = dict(payload)
+        if full_phone(payload.get("phone")) and payload.get("phone_source") != "douyin_clue":
+            payload["phone_state"] = "full"
+            payload["phone_available"] = True
+            return payload
+        if category == "new_lead":
+            rows = c.execute("SELECT payload FROM snapshots WHERE enterprise_id=? AND record_type='lead' AND record_id=?",
+                             (enterprise_id, payload["record_id"])).fetchall()
+        else:
+            rows = c.execute("SELECT payload FROM snapshots WHERE enterprise_id=? AND record_type='lead' "
+                             "AND json_extract(payload,'$.order_id')=? AND json_extract(payload,'$.poi_id')=?",
+                             (enterprise_id, payload["record_id"], payload.get("poi_id", ""))).fetchall()
+        contacts = [json.loads(row[0]) for row in rows]
+        if payload.get("phone_source") == "douyin_clue":
+            payload["phone"] = ""
+        phones = {full_phone(row.get("phone")) for row in contacts if full_phone(row.get("phone"))}
+        if len(phones) == 1:
+            payload["phone"] = phones.pop()
+            payload["phone_source"] = "douyin_clue"
+            if not payload.get("customer"):
+                payload["customer"] = next((row.get("customer") for row in contacts if row.get("customer")), "")
+        elif len(phones) > 1:
+            payload.update(phone="", phone_state="ambiguous", phone_available=False)
+            return payload
+        payload["phone_state"] = phone_state(payload.get("phone"))
+        payload["phone_available"] = payload["phone_state"] == "full"
+        return payload
+
+    def _resume_status(self, message, enterprise, store, template, now):
+        if now - message["event_time"] > self.db.settings("scheduler")["max_age_minutes"] * 60:
+            return "skipped_old", ""
+        if not template["enabled"]:
+            return "muted", ""
+        if not enterprise["enabled"] or (store and not store["enabled"]):
+            return "blocked", ""
+        if (not store or not store["group_id"] or not store["group_name"]
+                or store["group_id"] != message["group_id"] or store["group_name"] != message["group_name"]):
+            return "unrouted", "门店接收群已变更或不完整，请重新分配"
+        return "pending", ""
+
+    def refresh_waiting_phones(self, enterprise_id, record_ids):
+        """只有同企业、同订单、同门店的唯一完整号码可以自动解除等待。"""
+        refreshed = 0
+        now = time.time()
+        for offset in range(0, len(record_ids), 200):
+            batch = record_ids[offset:offset + 200]
+            if not batch:
+                continue
+            marks = ",".join("?" for _ in batch)
+            with self.db.connect(write=True) as c:
+                rows = c.execute("SELECT m.*,e.payload,e.event_time FROM messages m JOIN events e ON e.id=m.event_id "
+                                 f"WHERE m.enterprise_id=? AND m.status='waiting_phone' AND e.record_id IN ({marks})",
+                                 (enterprise_id, *batch)).fetchall()
+                for row in rows:
+                    payload = self._attach_phone(c, enterprise_id, json.loads(row["payload"]), row["category"])
+                    if not full_phone(payload.get("phone")):
+                        continue
+                    enterprise = c.execute("SELECT * FROM enterprises WHERE id=?", (enterprise_id,)).fetchone()
+                    store = c.execute("SELECT * FROM stores WHERE id=?", (row["store_id"],)).fetchone()
+                    template = dict(c.execute("SELECT * FROM templates WHERE kind=?", (row["category"],)).fetchone())
+                    status, error = self._resume_status(row, enterprise, store, template, now)
+                    body = render(template, payload, enterprise["name"], store["name"] if store else "")
+                    c.execute("UPDATE events SET payload=? WHERE id=?", (dumps(payload), row["event_id"]))
+                    c.execute("UPDATE messages SET body=?,status=?,last_error=?,updated_at=?,version=version+1 WHERE id=?",
+                              (body, status, error, now, row["id"]))
+                    refreshed += int(status == "pending")
+        return refreshed
+
     def ingest_order(self, account_id, raw, now=None):
         now = now or time.time()
         merchant = raw.get("merchant_info") if isinstance(raw, dict) else None
@@ -112,6 +184,7 @@ class Engine:
         results = []
         with self.db.connect(write=True) as c:
             enterprise = self._enterprise(c, account_id)
+            order = self._attach_phone(c, enterprise["id"], order)
             old_row = c.execute("SELECT payload FROM snapshots WHERE enterprise_id=? AND record_type='order' AND record_id=?",
                                 (enterprise["id"], order["record_id"])).fetchone()
             previous = json.loads(old_row[0]) if old_row else None
@@ -178,10 +251,11 @@ class Engine:
         if category == "status_change" and subtype not in EVENT_NAMES:
             raise ValueError("状态事件需要 event：paid/verified/refunding/refunded/canceled")
         payload = {k: text(source.get(k), 1000 if k == "remark" else 500) for k in
-                   ("poi_name", "customer", "goods", "quantity", "amount", "status", "intent", "source", "remark",
+                   ("poi_name", "customer", "goods", "quantity", "amount", "status", "intent", "source", "remark", "order_id", "phone_source",
                     "previous_status", "current_status", "refund_amount", "certificate_id")}
         payload.update({"record_id": record_id, "poi_id": text(raw.get("poi_id") or source.get("poi_id"), 120),
                         "phone": public_phone(source.get("phone")), "created_time": epoch(source.get("created_time")),
+                        "phone_state": phone_state(source.get("phone")),
                         "event_time": epoch(raw.get("event_time"), now)})
         identity = "lead" if category == "new_lead" else text(raw.get("event_id"), 200)
         if category == "status_change" and not identity:
@@ -218,7 +292,7 @@ class Engine:
                     return None
                 scope = " AND m.group_id IN (" + ",".join("?" for _ in allowed) + ")"
                 args.extend(sorted(allowed))
-            rows = c.execute("SELECT m.*,evt.event_key AS dedup_key,s.enabled AS store_enabled,s.group_id AS current_group,s.group_name AS current_group_name,e.enabled AS enterprise_enabled,t.enabled AS template_enabled FROM messages m JOIN events evt ON evt.id=m.event_id LEFT JOIN stores s ON s.id=m.store_id JOIN enterprises e ON e.id=m.enterprise_id JOIN templates t ON t.kind=m.category WHERE m.status='pending' AND m.next_attempt<=?" + scope + " ORDER BY m.id LIMIT 100", args).fetchall()
+            rows = c.execute("SELECT m.*,evt.event_key AS dedup_key,evt.payload AS event_payload,s.enabled AS store_enabled,s.group_id AS current_group,s.group_name AS current_group_name,e.enabled AS enterprise_enabled,t.enabled AS template_enabled FROM messages m JOIN events evt ON evt.id=m.event_id LEFT JOIN stores s ON s.id=m.store_id JOIN enterprises e ON e.id=m.enterprise_id JOIN templates t ON t.kind=m.category WHERE m.status='pending' AND m.next_attempt<=?" + scope + " ORDER BY m.id LIMIT 100", args).fetchall()
             for row in rows:
                 m = dict(row)
                 if allowed is not None and m["group_id"] not in allowed:
@@ -231,6 +305,21 @@ class Engine:
                     continue
                 if m["group_id"] != m["current_group"] or m["group_name"] != m["current_group_name"]:
                     c.execute("UPDATE messages SET status='unrouted',last_error='门店接收群已变更，请重新分配',updated_at=?,version=version+1 WHERE id=?", (now, m["id"]))
+                    continue
+                payload = json.loads(m["event_payload"])
+                if not m["is_test"] and (payload.get("phone_source") == "douyin_clue" or not full_phone(payload.get("phone"))):
+                    refreshed = self._attach_phone(c, m["enterprise_id"], payload, m["category"])
+                    if refreshed != payload:
+                        template = dict(c.execute("SELECT * FROM templates WHERE kind=?", (m["category"],)).fetchone())
+                        enterprise = c.execute("SELECT name FROM enterprises WHERE id=?", (m["enterprise_id"],)).fetchone()
+                        store = c.execute("SELECT name FROM stores WHERE id=?", (m["store_id"],)).fetchone()
+                        m["body"] = render(template, refreshed, enterprise["name"], store["name"] if store else "")
+                        c.execute("UPDATE events SET payload=? WHERE id=?", (dumps(refreshed), m["event_id"]))
+                        c.execute("UPDATE messages SET body=?,updated_at=?,version=version+1 WHERE id=?", (m["body"], now, m["id"]))
+                    payload = refreshed
+                if (self.db.settings("notifications")["require_full_phone"] and not m["is_test"]
+                        and not full_phone(payload.get("phone"))):
+                    c.execute("UPDATE messages SET status='waiting_phone',last_error='尚未取得完整手机号',updated_at=?,version=version+1 WHERE id=?", (now, m["id"]))
                     continue
                 lease = uuid.uuid4().hex
                 c.execute("UPDATE messages SET status='sending',lease_token=?,lease_until=?,worker_id=?,attempts=attempts+1,updated_at=?,version=version+1 WHERE id=?", (lease, now + cfg["lease_seconds"], worker_id, now, m["id"]))
@@ -302,6 +391,53 @@ class Engine:
         except requests.RequestException as e:
             return self.finish(job["id"], job["lease_token"], "uncertain", error_text(e, (token,)))
 
+    def sync_clues(self, enterprise, now, max_pages):
+        cfg = self.db.settings("douyin")
+        start = enterprise["clue_cursor"] - 600 if enterprise.get("clue_cursor") else now - cfg["clue_lookback_days"] * 86400
+        end = min(now - 600, start + 365 * 86400)
+        result = {"clues": 0, "full_phones": 0, "masked_phones": 0, "queued": 0}
+        if end <= start:
+            return result
+        batch, warnings, changed = [], [], set()
+
+        def consume(records):
+            records, warning = self.client.decrypt_clues(records, enterprise["account_id"])
+            if warning:
+                warnings.append(warning)
+            for raw in records:
+                event = normalize_clue(raw, enterprise["account_id"])
+                added = self.ingest_event(event)
+                result["clues"] += 1
+                result["queued"] += added["queued"]
+                result["full_phones"] += bool(full_phone(event["data"]["phone"]))
+                result["masked_phones"] += event["data"]["phone"].count("*") > 0
+                changed.add(event["record_id"])
+                if event["data"].get("order_id"):
+                    changed.add(event["data"]["order_id"])
+
+        for raw in self.client.clues(enterprise["account_id"], start, end, max_pages):
+            if self.stop_event.is_set():
+                raise RuntimeError("服务停止，本企业线索游标未推进")
+            batch.append(raw)
+            if len(batch) == 100:
+                consume(batch)
+                batch = []
+        if batch:
+            consume(batch)
+        result["queued"] += self.refresh_waiting_phones(enterprise["id"], sorted(changed))
+        warning = "; ".join(dict.fromkeys(warnings))[:1500]
+        if not warning:
+            with self.db.connect(write=True) as c:
+                c.execute("UPDATE enterprises SET clue_cursor=? WHERE id=?", (end, enterprise["id"]))
+        detail = (f"真实客资中心查询 {result['clues']} 条线索；完整号码 {result['full_phones']} 条，"
+                  f"打码号码 {result['masked_phones']} 条。线索查询保留十分钟落入等待时间")
+        if warning:
+            result["warning"] = warning
+            detail += "；" + warning
+        save_check(self.db, "clues_" + str(enterprise["id"]), "partial" if warning else "ready",
+                   detail, identity(self.db, enterprise["account_id"]), result)
+        return result
+
     def run_sync(self, trigger="manual"):
         if not self.sync_lock.acquire(blocking=False):
             raise Conflict("已有同步任务正在运行")
@@ -321,22 +457,34 @@ class Engine:
                 # 拆小时间窗。服务器长时间停机后逐轮追赶，成功后才推进该企业游标。
                 end = min(now - 3, start + 86400)
                 entry = {"enterprise": enterprise["name"], "orders": 0, "queued": 0}
+                if self.db.settings("douyin")["clue_enabled"]:
+                    try:
+                        clues = self.sync_clues(enterprise, now, cfg["max_pages"])
+                        entry.update(clues)
+                        if clues.get("warning"):
+                            errors += 1
+                    except Exception as exc:
+                        errors += 1
+                        entry["clue_error"] = error_text(exc, (self.db.secret("douyin_secret"),))
+                        save_check(self.db, "clues_" + str(enterprise["id"]), "failed", entry["clue_error"], order_identity)
                 try:
                     batch = []
-                    warning = ""
+                    warning = entry.get("warning", "")
                     for raw in self.client.orders(enterprise["account_id"], start, end, cfg["max_pages"]):
                         if self.stop_event.is_set():
                             raise RuntimeError("服务停止，本企业同步游标未推进")
                         batch.append(raw)
                         if len(batch) >= 100:
-                            batch, warning = self.client.decrypt_orders(batch, enterprise["account_id"])
+                            batch, decrypt_warning = self.client.decrypt_orders(batch, enterprise["account_id"])
+                            warning = "; ".join(v for v in (warning, decrypt_warning) if v)
                             for item in batch:
                                 result = self.ingest_order(enterprise["account_id"], item)
                                 entry["orders"] += 1
                                 entry["queued"] += result["queued"]
                             batch = []
                     if batch:
-                        batch, warning = self.client.decrypt_orders(batch, enterprise["account_id"])
+                        batch, decrypt_warning = self.client.decrypt_orders(batch, enterprise["account_id"])
+                        warning = "; ".join(v for v in (warning, decrypt_warning) if v)
                         for item in batch:
                             result = self.ingest_order(enterprise["account_id"], item)
                             entry["orders"] += 1
@@ -357,7 +505,8 @@ class Engine:
                 orders_count += entry["orders"]
                 queued += entry["queued"]
                 details.append(entry)
-            status = "partial" if errors and errors < len(details) else ("failed" if errors else "success")
+            any_progress = any(item.get("orders") or item.get("clues") for item in details)
+            status = ("partial" if any_progress else "failed") if errors else "success"
             with self.db.connect(write=True) as c:
                 c.execute("UPDATE task_runs SET status=?,finished_at=?,orders=?,queued=?,errors=?,details=? WHERE id=?",
                           (status, time.time(), orders_count, queued, errors, dumps(details), run_id))
@@ -439,7 +588,7 @@ class Engine:
     def manual_action(self, message_id, action, data):
         now = time.time()
         with self.db.connect(write=True) as c:
-            row = c.execute("SELECT m.*,e.payload,e.record_id FROM messages m JOIN events e ON e.id=m.event_id WHERE m.id=?", (message_id,)).fetchone()
+            row = c.execute("SELECT m.*,e.payload,e.record_id,e.event_time FROM messages m JOIN events e ON e.id=m.event_id WHERE m.id=?", (message_id,)).fetchone()
             if not row:
                 raise ValueError("通知不存在")
             row = dict(row)
@@ -449,7 +598,23 @@ class Engine:
                 raise Conflict("正在发送或等待回执，请先等待结果或超时后处理")
             if action in ("retry", "route") and row["status"] == "uncertain" and not text(data.get("note"), 500):
                 raise ValueError("请先核实群内未发送，并填写核实说明再补发")
-            if action == "retry":
+            if action == "contact":
+                phone = full_phone(data.get("phone"))
+                note = text(data.get("note"), 500)
+                if row["status"] in ("sent", "canceled") or not phone or not note:
+                    raise ValueError("请为未发送的通知填写完整手机号和取得号码的说明")
+                payload = json.loads(row["payload"])
+                payload.update(phone=phone, phone_state="full", phone_available=True, phone_source="manual")
+                template = dict(c.execute("SELECT * FROM templates WHERE kind=?", (row["category"],)).fetchone())
+                enterprise = c.execute("SELECT * FROM enterprises WHERE id=?", (row["enterprise_id"],)).fetchone()
+                store = c.execute("SELECT * FROM stores WHERE id=?", (row["store_id"],)).fetchone()
+                body = render(template, payload, enterprise["name"], store["name"] if store else "")
+                # 补录不直接发送，也不解除门店绑定、暂停或历史记录的状态。
+                status, error = self._resume_status(row, enterprise, store, template, now) if row["status"] == "waiting_phone" else (row["status"], "")
+                c.execute("UPDATE events SET payload=? WHERE id=?", (dumps(payload), row["event_id"]))
+                c.execute("UPDATE messages SET body=?,status=?,last_error=?,updated_at=?,version=version+1 WHERE id=?",
+                          (body, status, error, now, message_id))
+            elif action == "retry":
                 if row["status"] in ("sent", "canceled"):
                     raise Conflict("已发送或已取消的通知不能直接重试")
                 store = c.execute("SELECT s.*,e.enabled AS enterprise_enabled FROM stores s JOIN enterprises e ON e.id=s.enterprise_id WHERE s.id=?", (row["store_id"],)).fetchone()

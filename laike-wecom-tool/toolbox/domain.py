@@ -59,6 +59,39 @@ def public_phone(value):
     return value
 
 
+def full_phone(value):
+    value = public_phone(value)
+    compact = re.sub(r"[\s()\-]", "", value)
+    return compact[-11:] if re.fullmatch(r"(?:\+?86)?1[3-9]\d{9}", compact) else ""
+
+
+def phone_state(value):
+    return "full" if full_phone(value) else ("masked" if "*" in public_phone(value) else "missing")
+
+
+def normalize_clue(raw, account_id):
+    if not isinstance(raw, dict) or not text(raw.get("clue_id"), 120):
+        raise ValueError("线索缺少稳定的 clue_id")
+    root = text(raw.get("root_life_account_id"), 120)
+    if root and root != str(account_id):
+        raise ValueError("线索中的商户根账号与接入企业不一致")
+    created = epoch(raw.get("create_time_detail"))
+    if not created:
+        raise ValueError("线索缺少有效创建时间，不能作为新留资通知")
+    order_id = text(raw.get("order_id"), 120)
+    if order_id == "0":
+        order_id = ""
+    phone = public_phone(raw.get("phone"))
+    return {"type": "new_lead", "account_id": str(account_id),
+            "record_id": text(raw["clue_id"], 120),
+            "poi_id": text(raw.get("intention_poi_id") or raw.get("follow_poi_id"), 120),
+            "event_time": created,
+            "data": {"customer": text(raw.get("name")), "phone": phone, "phone_source": "douyin_clue",
+                     "order_id": order_id, "intent": text(raw.get("product_name") or raw.get("clue_intention")),
+                     "source": "抖音客资中心", "remark": text(raw.get("remark"), 1000),
+                     "created_time": created}}
+
+
 def normalize_order(raw, amount_unit="fen"):
     if not isinstance(raw, dict):
         raise ValueError("订单必须是对象")
@@ -78,8 +111,9 @@ def normalize_order(raw, amount_unit="fen"):
     if quantity is None:
         quantities = [p.get("count") or p.get("quantity") for p in products if isinstance(p, dict)]
         quantity = sum(int(v) for v in quantities if str(v).isdigit()) or None
-    phone = next((public_phone(v) for v in (buyer.get("buyer_real_phone"), contact.get("phone"),
-                 contact.get("phone_encrypt"), buyer.get("buyer_phone"), raw.get("phone")) if public_phone(v)), "")
+    phones = [public_phone(v) for v in (buyer.get("buyer_real_phone"), contact.get("phone"),
+              contact.get("phone_encrypt"), buyer.get("buyer_phone"), raw.get("phone")) if public_phone(v)]
+    phone = next((full_phone(v) for v in phones if full_phone(v)), next(iter(phones), ""))
     customer = contact.get("name") or buyer.get("name") or raw.get("customer") or ""
     if str(customer).startswith("Enc."):
         customer = ""
@@ -102,7 +136,8 @@ def normalize_order(raw, amount_unit="fen"):
             "created_time": epoch(raw.get("create_order_time") or raw.get("created_at")),
             "paid_time": epoch(raw.get("pay_time") or raw.get("pay_order_time")),
             "updated_time": epoch(raw.get("update_order_time") or raw.get("updated_at")),
-            "phone_available": bool(phone)}
+            "phone_available": bool(full_phone(phone)), "phone_state": phone_state(phone),
+            "phone_source": "douyin_order" if phone else ""}
 
 
 def event_key(account_id, category, record_id, identity=""):
