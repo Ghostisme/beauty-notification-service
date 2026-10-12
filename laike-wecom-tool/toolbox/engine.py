@@ -32,13 +32,15 @@ class Engine:
         self.launch_lock = threading.Lock()
         self.http = requests.Session()
 
-    def _enterprise(self, c, account_id):
+    def _enterprise(self, c, account_id, allow_test=False):
         row = c.execute("SELECT * FROM enterprises WHERE account_id=?", (str(account_id),)).fetchone()
         if not row:
             raise ValueError("商户账号尚未绑定，请先在企业与门店中添加企业")
+        if row["is_test"] and not allow_test:
+            raise ValueError("测试企业只接收后台创建的模拟测试消息，不能接入真实业务数据")
         return dict(row)
 
-    def _emit(self, c, enterprise, category, name, payload, identity="", now=None):
+    def _emit(self, c, enterprise, category, name, payload, identity="", now=None, is_test=False):
         now = now or time.time()
         record_id = text(payload.get("record_id"), 120)
         key = event_key(enterprise["account_id"], category, record_id, identity)
@@ -69,11 +71,35 @@ class Engine:
         elif not store or not store["group_id"] or not store["group_name"]:
             status, error = "unrouted", "未找到本企业内门店的完整群绑定，请手动分配"
         body = render(template, payload, enterprise["name"], store["name"] if store else "")
-        msg = c.execute("INSERT INTO messages(event_id,enterprise_id,store_id,category,group_id,group_name,body,status,last_error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        if is_test:
+            body = "【发送链路测试｜模拟数据】\n" + body
+        msg = c.execute("INSERT INTO messages(event_id,enterprise_id,store_id,category,group_id,group_name,body,status,last_error,created_at,updated_at,is_test) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                         (event_id, enterprise["id"], store["id"] if store else None, category,
                          store["group_id"] if store else "", store["group_name"] if store else "",
-                         body, status, error, now, now))
+                         body, status, error, now, now, int(is_test)))
         return {"duplicate": False, "queued": int(status == "pending"), "message_id": msg.lastrowid, "status": status}
+
+    def create_test_message(self, store_id, category="new_order"):
+        names = {"new_order": "新订单通知", "new_lead": "新留资通知", "status_change": "核销成功通知"}
+        if not isinstance(category, str) or category not in names:
+            raise ValueError("请选择新订单、新留资或状态变化测试")
+        now = time.time()
+        identifier = "TEST-" + secrets.token_hex(5).upper()
+        with self.db.connect(write=True) as c:
+            store = c.execute("SELECT s.*,e.account_id,e.is_test,e.enabled AS enterprise_enabled "
+                              "FROM stores s JOIN enterprises e ON e.id=s.enterprise_id WHERE s.id=?", (store_id,)).fetchone()
+            if not store or not store["is_test"] or not store["enabled"] or not store["enterprise_enabled"] or not store["group_id"] or not store["group_name"]:
+                raise ValueError("请选择已配置并启用的专用测试群")
+            enterprise = self._enterprise(c, store["account_id"], allow_test=True)
+            payload = {"record_id": identifier, "poi_id": store["poi_id"], "event_time": now,
+                       "created_time": now, "customer": "测试客户（模拟）", "phone": "", "quantity": "1",
+                       "goods": "测试团购套餐（模拟）", "amount": "¥0.01", "status": "已支付（模拟）",
+                       "intent": "测试护理项目（模拟）", "source": "管理后台测试",
+                       "remark": "仅用于消息链路测试，无需业务处理",
+                       "previous_status": "待使用（模拟）", "current_status": "已核销（模拟）"}
+            result = self._emit(c, enterprise, category, names[category], payload, now=now, is_test=True)
+            self.db.audit("创建测试消息", result["message_id"], category, c)
+        return {**result, "record_id": identifier}
 
     def ingest_order(self, account_id, raw, now=None):
         now = now or time.time()
@@ -284,7 +310,7 @@ class Engine:
             run_id = c.execute("INSERT INTO task_runs(trigger,status,started_at) VALUES (?,'running',?)", (trigger, now)).lastrowid
         details, orders_count, queued, errors = [], 0, 0, 0
         try:
-            enterprises = self.db.rows("SELECT * FROM enterprises WHERE enabled=1 ORDER BY id")
+            enterprises = self.db.rows("SELECT * FROM enterprises WHERE enabled=1 AND is_test=0 ORDER BY id")
             for enterprise in enterprises:
                 start = enterprise["sync_cursor"] - 180 if enterprise["sync_cursor"] else now - cfg["lookback_minutes"] * 60
                 # 拆小时间窗。服务器长时间停机后逐轮追赶，成功后才推进该企业游标。

@@ -3,5 +3,8 @@
   "demo_init_ok": true,
   "formal_init_ok": true,
   "demo_records": 64,
-  "external_messages_sent": 0
+  "dedicated_test_group_init_ok": true,
+  "external_messages_sent": 0,
+  "checked_at": "2026-10-12T10:58:56.713996+00:00",
+  "temporary_files_cleaned": true
 }

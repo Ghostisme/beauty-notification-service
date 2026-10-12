@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS secrets (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, auth_version INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS enterprises (
  id INTEGER PRIMARY KEY, account_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
- enabled INTEGER NOT NULL DEFAULT 1, sync_cursor REAL, last_sync REAL,
+ enabled INTEGER NOT NULL DEFAULT 1, is_test INTEGER NOT NULL DEFAULT 0, sync_cursor REAL, last_sync REAL,
  last_error TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS stores (
  id INTEGER PRIMARY KEY, enterprise_id INTEGER NOT NULL REFERENCES enterprises(id),
@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS audit (
 PRAGMA user_version=1;
 """)
         with self.connect(write=True) as c:
+            if "is_test" not in {row[1] for row in c.execute("PRAGMA table_info(enterprises)")}:
+                c.execute("ALTER TABLE enterprises ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0")
             if "retry_generation" not in {row[1] for row in c.execute("PRAGMA table_info(messages)")}:
                 c.execute("ALTER TABLE messages ADD COLUMN retry_generation INTEGER NOT NULL DEFAULT 0")
             c.execute("INSERT OR IGNORE INTO dedup_keys SELECT event_key,created_at FROM events")

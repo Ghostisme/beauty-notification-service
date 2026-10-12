@@ -21,3 +21,4 @@ artifacts/*
 !artifacts/windows-sender-check.json
 !artifacts/release-smoke.json
 !artifacts/tests.xml
+!artifacts/test-group.png

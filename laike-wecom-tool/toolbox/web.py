@@ -18,6 +18,7 @@ from .db import Database, dumps
 from .defaults import SETTINGS, STATUS_LABELS, TEMPLATES, VARIABLES
 from .domain import error_text, render, text, validate_template
 from .engine import Conflict, Engine
+from .testing import TEST_GROUP_ID, TEST_GROUP_NAME, TEST_POI_ID, prepare_test_group, test_group
 
 
 def integer(value, low, high, label):
@@ -204,8 +205,8 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
         disk = shutil.disk_usage(db.directory)
         db_size = sum(p.stat().st_size for p in db.directory.glob("tool.db*") if p.is_file())
         return jsonify(counts=counts, sent_today=stat["total"], manual_today=stat["manual"] or 0,
-                       enterprises=db.one("SELECT COUNT(*) AS n FROM enterprises")["n"],
-                       stores=db.one("SELECT COUNT(*) AS n FROM stores")["n"], workers=workers, runs=runs,
+                       enterprises=db.one("SELECT COUNT(*) AS n FROM enterprises WHERE is_test=0")["n"],
+                       stores=db.one("SELECT COUNT(*) AS n FROM stores s JOIN enterprises e ON e.id=s.enterprise_id WHERE e.is_test=0")["n"], workers=workers, runs=runs,
                        scheduler=db.settings("scheduler"), notifications=db.settings("notifications"),
                        channel_mode=db.settings("channel")["mode"], last_tick=engine.last_tick,
                        next_sync=engine.next_sync, sync_running=engine.sync_lock.locked(),
@@ -255,7 +256,7 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
     @app.get("/api/stores")
     @admin
     def stores():
-        return jsonify(items=db.rows("SELECT s.*,e.name AS enterprise_name,e.account_id FROM stores s JOIN enterprises e ON e.id=s.enterprise_id ORDER BY e.id,s.id"))
+        return jsonify(items=db.rows("SELECT s.*,e.name AS enterprise_name,e.account_id,e.is_test FROM stores s JOIN enterprises e ON e.id=s.enterprise_id ORDER BY e.id,s.id"))
 
     def save_store(data, store_id=None):
         enterprise_id = integer(data.get("enterprise_id"), 1, 2147483647, "企业 ID")
@@ -266,8 +267,11 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
         if not isinstance(enabled, bool):
             raise ValueError("启用状态必须是布尔值")
         with db.connect(write=True) as c:
-            if not c.execute("SELECT 1 FROM enterprises WHERE id=?", (enterprise_id,)).fetchone():
+            enterprise = c.execute("SELECT * FROM enterprises WHERE id=?", (enterprise_id,)).fetchone()
+            if not enterprise:
                 raise ValueError("企业不存在")
+            if enterprise["is_test"] and (values[0], values[2], values[3]) != (TEST_POI_ID, TEST_GROUP_ID, TEST_GROUP_NAME):
+                raise ValueError("专用测试门店的群绑定固定，请使用测试消息入口")
             if c.execute("SELECT 1 FROM stores WHERE enterprise_id=? AND poi_id=? AND id<>?", (enterprise_id, values[0], store_id or 0)).fetchone():
                 raise ValueError("该企业下已绑定此抖音门店 ID")
             if values[2] and c.execute("SELECT 1 FROM stores WHERE group_id=? AND id<>?", (values[2], store_id or 0)).fetchone():
@@ -423,7 +427,7 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
         clause = " WHERE " + " AND ".join(where) if where else ""
         base = " FROM messages m JOIN events e ON e.id=m.event_id JOIN enterprises n ON n.id=m.enterprise_id LEFT JOIN stores s ON s.id=m.store_id"
         total = db.one("SELECT COUNT(*) AS n" + base + clause, args)["n"]
-        fields = "m.id,m.category,m.group_name,m.status,m.attempts,m.last_error,m.result_source,m.created_at,m.sent_at,m.version,m.next_attempt,e.event_name,e.record_id,n.name AS enterprise_name,s.name AS store_name"
+        fields = "m.id,m.category,m.is_test,m.group_name,m.status,m.attempts,m.last_error,m.result_source,m.created_at,m.sent_at,m.version,m.next_attempt,e.event_name,e.record_id,n.name AS enterprise_name,s.name AS store_name"
         items = db.rows("SELECT " + fields + base + clause + " ORDER BY m.id DESC LIMIT ? OFFSET ?", (*args, page_size, (page - 1) * page_size))
         return jsonify(items=items, total=total, page=page, page_size=page_size, labels=STATUS_LABELS)
 
@@ -460,20 +464,22 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
         db.audit("手工录入留资", result.get("message_id", ""))
         return jsonify(result), 201
 
+    @app.get("/api/test-group")
+    @admin
+    def test_group_get():
+        return jsonify(test_group(db))
+
+    @app.post("/api/test-group")
+    @admin
+    def test_group_prepare():
+        return jsonify(prepare_test_group(db))
+
     @app.post("/api/test-message")
     @admin
     def test_message():
         data = body()
-        store = db.one("SELECT s.*,e.account_id FROM stores s JOIN enterprises e ON e.id=s.enterprise_id WHERE s.id=?", (data.get("store_id"),))
-        if not store or not store["enabled"] or not store["group_id"] or not store["group_name"]:
-            raise ValueError("请选择已启用且群绑定完整的测试门店")
-        identifier = "TEST-" + secrets.token_hex(5)
-        event = {"type": "new_lead", "account_id": store["account_id"], "poi_id": store["poi_id"],
-                 "record_id": identifier, "event_time": time.time(), "data": {"customer": "链路测试", "intent": "消息发送测试", "source": "管理后台", "remark": "这是一条测试消息，无需业务处理"}}
-        result = engine.ingest_event(event)
-        with db.connect(write=True) as c:
-            c.execute("UPDATE messages SET is_test=1,body='【发送链路测试】' || char(10) || body WHERE id=?", (result["message_id"],))
-        db.audit("创建测试消息", result["message_id"])
+        store_id = integer(data.get("store_id"), 1, 2147483647, "测试门店 ID")
+        result = engine.create_test_message(store_id, data.get("category", "new_order"))
         return jsonify(result), 201
 
     @app.post("/api/ingest")

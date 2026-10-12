@@ -1,10 +1,12 @@
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || '@playwright/test');
 const fs = require('fs');
 const path = require('path');
+let activeBrowser;
 
 (async () => {
   const output = path.resolve('artifacts');fs.mkdirSync(output,{recursive:true});
   const browser = await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined});
+  activeBrowser=browser;
   const context = await browser.newContext({viewport:{width:1440,height:1080},locale:'zh-CN',timezoneId:'Asia/Shanghai'});
   const page = await context.newPage();const errors=[];const checks=[];
   page.on('pageerror',error=>errors.push(error.message));
@@ -13,6 +15,25 @@ const path = require('path');
   await page.locator('#login-form input[name=password]').fill(process.env.TOOL_TEST_PASSWORD || 'Demo-only-20261012!');
   await page.locator('#login-form button[type=submit]').click();
   await page.locator('#main-content h1').waitFor();
+  const session=await (await page.request.get((process.env.TOOL_TEST_URL || 'http://127.0.0.1:8790')+'/api/session')).json();
+  if(!session.demo)throw new Error('界面自动化检查仅允许离线演示环境');
+  await page.locator('[data-action=test-message]').click();
+  await page.locator('#modal[open]').waitFor();
+  if(await page.locator('[data-action=prepare-test-group]').count())await page.locator('[data-action=prepare-test-group]').click();
+  await page.locator('#test-form').waitFor();
+  await page.locator('#modal').getByText('壹心-湖南-测试消息店',{exact:true}).waitFor();
+  await page.screenshot({path:path.join(output,'test-group.png')});checks.push('专用测试群配置与模拟数据提示');
+  for(const category of ['new_order','new_lead','status_change']) {
+    if(!await page.locator('#test-form').count())await page.locator('[data-action=test-message]').click();
+    await page.locator('#test-form select[name=category]').selectOption(category);
+    await page.locator('#test-form button[type=submit]').click();
+    await page.locator('#message-body').waitFor();
+    const body=await page.locator('#message-body').inputValue();
+    if(!body.startsWith('【发送链路测试｜模拟数据】')||!body.includes('TEST-'))throw new Error('测试消息未标记模拟数据或编号');
+    await page.locator('#modal dd').filter({hasText:'壹心-湖南-测试消息店'}).waitFor();
+    checks.push('专用测试群 '+category+' 生成及接收群核对');
+    await page.locator('#modal-close').click();
+  }
   await page.screenshot({path:path.join(output,'dashboard.png')});checks.push('登录及概览');
   for(const target of ['messages','stores','templates','tasks','settings']) {
     await page.locator(`aside button[data-page=${target}]`).click();
@@ -72,4 +93,4 @@ const path = require('path');
   await browser.close();
   const report={checks,errors,checked_at:new Date().toISOString()};fs.writeFileSync(path.join(output,'browser-check.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));if(errors.length)process.exitCode=1;
-})().catch(error=>{console.error(error);process.exitCode=1});
+})().catch(async error=>{if(activeBrowser)await activeBrowser.close().catch(()=>{});console.error(error);process.exitCode=1});

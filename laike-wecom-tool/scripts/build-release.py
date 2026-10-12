@@ -11,7 +11,7 @@ FILES=['README.md','run.py','sender.py','manage.py','requirements.txt','requirem
        '.gitignore','.dockerignore','start-demo.bat','start-server.bat','start-sender.bat']
 DIRECTORIES=['toolbox','sender','deploy','docs','tests','scripts']
 EVIDENCE=['dashboard.png','templates.png','manual-review.png','mobile.png','benchmark.json',
-          'browser-check.json','windows-sender-check.json','release-smoke.json','tests.xml']
+          'browser-check.json','windows-sender-check.json','release-smoke.json','tests.xml','test-group.png']
 
 
 def main():

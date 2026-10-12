@@ -9,6 +9,7 @@
 | [工具说明与本地启动](laike-wecom-tool/README.md) | 演示、正式实例、Windows 发送端及首次接入 |
 | [从当前 GitHub 分支部署](laike-wecom-tool/docs/GitHub分支部署.md) | 拉取 `feature/laike-wecom-tool`、Docker 启动、维护与更新 |
 | [子域名与 HTTPS](laike-wecom-tool/docs/子域名启动说明.md) | 将 `notify.你的域名` 作为后台入口 |
+| [壹心测试群联调](laike-wecom-tool/docs/壹心测试群联调.md) | 使用 `壹心-湖南-测试消息店` 验证三类模拟通知与企微发送链路 |
 | [数据与发送工具接入](laike-wecom-tool/docs/接入说明.md) | 独立留资来源、标准事件、HTTP 发送接口 |
 | [验证记录](laike-wecom-tool/docs/验证记录.md) | 已完成的本地验证与实际账号联调范围 |
 

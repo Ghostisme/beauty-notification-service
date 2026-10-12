@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-def configure(path):
+def configure(path, test_only=False):
     server=input("服务器地址（如 https://notify.example.com）：").strip().rstrip("/")
     parts=urlsplit(server)
     if parts.scheme not in ("http","https") or not parts.hostname:
@@ -17,6 +17,10 @@ def configure(path):
     if len(token)<20:raise ValueError("接入令牌不完整")
     config={"server":server,"token":token,"worker_id":"windows-wecom-1","label":"Windows 企微发送端",
             "data_dir":"sender-data","profile":"sender-data/desktop-profile.json","poll_seconds":3}
+    if test_only:
+        from toolbox.testing import TEST_GROUP_ID
+        config["group_ids"] = [TEST_GROUP_ID]
+        config["label"] = "壹心测试群发送端"
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,"w",encoding="utf-8") as f:json.dump(config,f,ensure_ascii=False,indent=2)
@@ -30,11 +34,16 @@ def main():
     parser.add_argument("--calibrate",action="store_true")
     parser.add_argument("--check",action="store_true")
     parser.add_argument("--once",action="store_true")
+    parser.add_argument("--test-only",action="store_true",help="仅领取壹心-湖南-测试消息店的任务")
     args=parser.parse_args()
-    if args.configure:configure(args.config);return
+    if args.configure:configure(args.config, test_only=args.test_only);return
     path=Path(args.config)
     if not path.exists():parser.error("请先运行 sender.py --configure")
     config=json.loads(path.read_text(encoding="utf-8"))
+    if args.test_only:
+        from toolbox.testing import TEST_GROUP_ID
+        config["group_ids"] = [TEST_GROUP_ID]
+        config["label"] = "壹心测试群发送端"
     if args.calibrate:
         from sender.calibrate import calibrate
         calibrate(config.get("profile","sender-data/desktop-profile.json"));return
