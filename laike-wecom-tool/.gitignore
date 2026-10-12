@@ -10,7 +10,7 @@ demo-data/
 sender-data/
 sender-config.json
 dist/
-# 仅提交合成数据的验证材料，其余本地运行产物继续忽略。
+# 仅提交不含客户资料的验证材料，其余本地运行产物继续忽略。
 artifacts/*
 !artifacts/dashboard.png
 !artifacts/templates.png
