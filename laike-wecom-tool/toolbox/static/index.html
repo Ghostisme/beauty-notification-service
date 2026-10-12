@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#163b3b">
+  <title>来客门店通知 · 工作台</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <section id="login-view" class="login-view" hidden>
+    <div class="login-intro"><div class="brand-mark">来</div><div class="eyebrow">LAIKE NOTIFY</div><h1>每条线索，<br>送到对的门店。</h1><p>连接抖音来客与企微门店群，<br>让订单、留资和业务变化及时抵达。</p><div class="login-note"><span class="dot"></span>自动任务 · 门店分发 · 发送追踪</div></div>
+    <div class="login-card"><div class="eyebrow">欢迎回来</div><h2>登录通知工作台</h2><p class="muted">查看任务运行情况，处理需要你介入的消息。</p><form id="login-form"><label>管理员账号<input name="username" autocomplete="username" value="admin" required></label><label>登录密码<input name="password" type="password" autocomplete="current-password" required></label><p id="login-error" class="error-text" role="alert"></p><button class="primary full" type="submit">登录工作台 <span>→</span></button></form><p class="login-tip">首次使用时，初始密码保存在服务端的数据目录。</p></div>
+  </section>
+  <div id="app-view" class="app-shell" hidden>
+    <aside class="sidebar"><a class="brand" href="#dashboard"><span class="brand-mark small">来</span><span>来客门店通知<small>STORE NOTIFICATIONS</small></span></a><div class="nav-label">工作空间</div><nav id="navigation" aria-label="主导航"><button data-page="dashboard"><span>◈</span>运行概览</button><button data-page="messages"><span>▤</span>通知记录<span id="nav-count" class="nav-count" hidden></span></button><button data-page="stores"><span>▦</span>企业与门店</button><button data-page="templates"><span>▧</span>通知模板</button><button data-page="tasks"><span>◷</span>自动任务</button><button data-page="settings"><span>⚙</span>接入设置</button></nav><div class="sidebar-bottom"><div class="sidebar-status"><span class="dot"></span>轻量通知服务</div><div class="sidebar-meta">单服务运行 · 数据本地保存</div><button id="password-button" class="sidebar-link">修改登录密码</button><button id="logout-button" class="sidebar-link">退出登录</button></div></aside>
+    <div class="workspace"><header class="topbar"><button id="menu-button" class="icon-button mobile-only" aria-label="展开导航">☰</button><div class="breadcrumb">工作空间 <span>/</span> <strong id="breadcrumb">运行概览</strong></div><div class="topbar-right"><span id="demo-badge" class="badge amber" hidden>演示环境</span><span class="topbar-time" id="clock"></span><span class="avatar">管</span></div></header><main id="main-content" tabindex="-1"></main><footer class="footer"><span>来客门店通知工具</span><span>所有业务时间均为北京时间 · <span id="version">v1.0</span></span></footer></div>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"><div class="modal-header"><h2 id="modal-title"></h2><button id="modal-close" class="icon-button" aria-label="关闭">×</button></div><div id="modal-content"></div></dialog>
+  <div id="toast" role="status" class="toast" hidden></div>
+</body>
+</html>

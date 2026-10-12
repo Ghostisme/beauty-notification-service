@@ -1,0 +1,15 @@
+{
+  "environment": "本机 Windows / Python 3.12.0",
+  "cpu_limit_applied": false,
+  "synthetic_events": 1000,
+  "queued": 1000,
+  "seconds": 30.52,
+  "events_per_second": 32.8,
+  "idle_rss_mib": 53.6,
+  "observed_peak_rss_mib": 54.1,
+  "idle_cpu_percent": 0.78,
+  "dashboard_average_ms": 81.2,
+  "dashboard_poll_bytes_uncompressed": 3352,
+  "database_bytes": 1740800,
+  "checked_at": "2026-10-12 18:12:58"
+}

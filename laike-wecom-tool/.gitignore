@@ -1,0 +1,23 @@
+.venv/
+.sender-venv/
+node_modules/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+data/
+demo-data/
+sender-data/
+sender-config.json
+dist/
+# 仅提交合成数据的验证材料，其余本地运行产物继续忽略。
+artifacts/*
+!artifacts/dashboard.png
+!artifacts/templates.png
+!artifacts/manual-review.png
+!artifacts/mobile.png
+!artifacts/benchmark.json
+!artifacts/browser-check.json
+!artifacts/windows-sender-check.json
+!artifacts/release-smoke.json
+!artifacts/tests.xml

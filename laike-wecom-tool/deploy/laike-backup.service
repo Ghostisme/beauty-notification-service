@@ -1,0 +1,12 @@
+[Unit]
+Description=Backup Laike tool database and encryption key
+
+[Service]
+Type=oneshot
+User=laike-tool
+Group=laike-tool
+WorkingDirectory=/opt/laike-wecom-tool
+ExecStart=/opt/laike-wecom-tool/.venv/bin/python manage.py backup --retain 7
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

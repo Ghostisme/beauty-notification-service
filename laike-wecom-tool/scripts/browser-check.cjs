@@ -1,0 +1,75 @@
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || '@playwright/test');
+const fs = require('fs');
+const path = require('path');
+
+(async () => {
+  const output = path.resolve('artifacts');fs.mkdirSync(output,{recursive:true});
+  const browser = await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined});
+  const context = await browser.newContext({viewport:{width:1440,height:1080},locale:'zh-CN',timezoneId:'Asia/Shanghai'});
+  const page = await context.newPage();const errors=[];const checks=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  page.on('response',r=>{if(r.status()>=500)errors.push(`${r.status()} ${r.url()}`)});
+  await page.goto(process.env.TOOL_TEST_URL || 'http://127.0.0.1:8790');
+  await page.locator('#login-form input[name=password]').fill(process.env.TOOL_TEST_PASSWORD || 'Demo-only-20261012!');
+  await page.locator('#login-form button[type=submit]').click();
+  await page.locator('#main-content h1').waitFor();
+  await page.screenshot({path:path.join(output,'dashboard.png')});checks.push('登录及概览');
+  for(const target of ['messages','stores','templates','tasks','settings']) {
+    await page.locator(`aside button[data-page=${target}]`).click();
+    await page.locator('#main-content h1').waitFor();
+    await page.waitForFunction(()=>!document.querySelector('#main-content .loading'));
+    if(await page.getByText('暂时无法读取数据',{exact:true}).count())throw new Error(`${target} failed to load`);
+    checks.push(`页面 ${target}`);
+  }
+  await page.locator('aside button[data-page=templates]').click();
+  await page.locator('#template-preview').getByText(/订单编号/).waitFor();
+  await page.screenshot({path:path.join(output,'templates.png')});
+  for(const kind of ['new_lead','status_change','new_order']) {
+    await page.locator(`[data-template=${kind}]`).click();
+    await page.locator('#template-body').waitFor();
+    await page.locator('[data-action=preview-template]').click();
+    await page.getByText('预览已更新，未发送消息',{exact:true}).waitFor();
+  }
+  checks.push('三类模板预览');
+  await page.locator('#template-form button[type=submit]').click();
+  await page.getByText('通知模板已保存',{exact:true}).waitFor();checks.push('保存模板');
+  await page.locator('aside button[data-page=stores]').click();await page.locator('[data-edit-store="1"]').click();
+  await page.locator('#store-form button[type=submit]').click();
+  await page.getByText('门店与群绑定已保存',{exact:true}).waitFor();checks.push('保存门店群绑定');
+  await page.locator('aside button[data-page=tasks]').click();
+  await page.locator('#scheduler-form button[type=submit]').click();
+  await page.getByText('自动同步计划已保存',{exact:true}).waitFor();
+  await page.locator('#notifications-form button[type=submit]').click();
+  await page.getByText('通知发送规则已保存',{exact:true}).waitFor();checks.push('保存自动任务与状态规则');
+  await page.locator('aside button[data-page=settings]').click();
+  await page.locator('#channel-form button[type=submit]').click();
+  await page.getByText('企微发送设置已保存',{exact:true}).waitFor();checks.push('保存发送端设置');
+  await page.locator('aside button[data-page=messages]').click();await page.locator('#filter-form').waitFor();
+  await page.locator('#filter-form select[name=status]').selectOption('uncertain');
+  await page.locator('#filter-form button').click();
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('tbody .badge')).every(v=>v.textContent==='待人工核实'));
+  await page.locator('[data-detail]').first().click();await page.locator('#modal[open]').waitFor();
+  await page.getByText('发送结果尚未确认。',{exact:false}).waitFor();
+  await page.screenshot({path:path.join(output,'manual-review.png')});
+  await page.locator('[data-message-action=retry]').click();await page.locator('#not-sent-note').waitFor();
+  checks.push('筛选、通知详情及不明结果补发确认');
+  await page.locator('#modal-close').click();
+  await page.locator('aside button[data-page=tasks]').click();await page.locator('[data-action=run-task]').click();
+  await page.getByText('同步任务已启动，运行结果会显示在任务记录中',{exact:true}).waitFor();
+  await page.waitForTimeout(900);checks.push('手动同步离线数据');
+  await page.locator('aside button[data-page=messages]').click();await page.locator('[data-action=manual-lead]').click();
+  await page.locator('#lead-enterprise').selectOption('1');await page.locator('#lead-store').selectOption('1');
+  await page.locator('#lead-form input[name=customer]').fill('浏览器测试客户');
+  await page.locator('#lead-form input[name=phone]').fill('13800000000');
+  await page.locator('#lead-form button[type=submit]').click();
+  await page.getByText('留资已保存，通知已生成',{exact:true}).waitFor();checks.push('手工录入留资并生成消息');
+  await page.setViewportSize({width:390,height:844});await page.goto((process.env.TOOL_TEST_URL || 'http://127.0.0.1:8790')+'/#dashboard');
+  await page.locator('#main-content h1').waitFor();await page.waitForTimeout(250);await page.screenshot({path:path.join(output,'mobile.png'),fullPage:true});
+  const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);
+  if(overflow)errors.push('手机页面出现整体横向溢出');
+  await page.locator('#menu-button').click();await page.locator('aside.open button[data-page=settings]').click();
+  await page.locator('#douyin-form').waitFor();checks.push('手机宽度布局及导航');
+  await browser.close();
+  const report={checks,errors,checked_at:new Date().toISOString()};fs.writeFileSync(path.join(output,'browser-check.json'),JSON.stringify(report,null,2));
+  console.log(JSON.stringify(report,null,2));if(errors.length)process.exitCode=1;
+})().catch(error=>{console.error(error);process.exitCode=1});

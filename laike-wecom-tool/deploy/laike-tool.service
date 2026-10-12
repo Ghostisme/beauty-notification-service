@@ -1,0 +1,29 @@
+[Unit]
+Description=Laike store notification service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=laike-tool
+Group=laike-tool
+WorkingDirectory=/opt/laike-wecom-tool
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=COOKIE_SECURE=true
+ExecStart=/opt/laike-wecom-tool/.venv/bin/python run.py --host 127.0.0.1 --port 8790
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+MemoryMax=384M
+CPUQuota=80%
+TasksMax=64
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/laike-wecom-tool/data
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

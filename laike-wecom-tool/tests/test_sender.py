@@ -1,0 +1,74 @@
+import copy
+
+import pytest
+import requests
+
+from sender.desktop import BeforeSendError, UncertainSendError, confirmation_anchors, exact_group, has_confirmation
+from sender.worker import Worker
+
+
+class Desktop:
+    def __init__(self,fail=None):self.calls=0;self.fail=fail
+    def ready(self):return True,'test desktop'
+    def send(self,job,before):
+        self.calls+=1
+        if self.fail=='before':raise BeforeSendError('未点击发送')
+        before()
+        if self.fail=='after':raise UncertainSendError('点击发送后未收到确认')
+        return {'status':'sent','group_id':job['group_id'],'detail':'模拟确认'}
+
+
+@pytest.fixture
+def job():
+    return {'id':1,'idempotency_key':'laike-message-1-r0','lease_token':'lease1','group_id':'g1','group_name':'测试群','text':'【抖音来客｜新订单通知】\n订单编号：T1'}
+
+
+def worker(tmp_path,desktop):
+    value=Worker({'server':'http://127.0.0.1:1','token':'fixture','data_dir':str(tmp_path)},desktop)
+    value.request=lambda *a,**k:{'status':'sent'}
+    return value
+
+
+def test_lost_receipt_does_not_resend_and_new_lease_can_ack(tmp_path,job):
+    desktop=Desktop();w=worker(tmp_path,desktop)
+    def disconnected(*a,**k):raise requests.ConnectionError('test disconnect')
+    w.request=disconnected
+    with pytest.raises(requests.ConnectionError):w.process(job)
+    assert w.ledger.get(job['idempotency_key'])['state']=='sent'
+    w.request=lambda *a,**k:{'status':'sent'}
+    job['lease_token']='lease2'
+    assert w.process(job)['status']=='sent' and desktop.calls==1
+    assert not w.ledger.pending()
+
+
+def test_uncertain_never_resends_without_explicit_manual_generation(tmp_path,job):
+    desktop=Desktop('after');w=worker(tmp_path,desktop)
+    assert w.process(job)['status']=='uncertain'
+    assert w.process(job)['status']=='uncertain' and desktop.calls==1
+    desktop.fail=None
+    job['idempotency_key']='laike-message-1-r1'
+    assert w.process(job)['status']=='sent' and desktop.calls==2
+
+
+def test_explicit_before_send_failure_can_retry_same_key(tmp_path,job):
+    desktop=Desktop('before');w=worker(tmp_path,desktop)
+    assert w.process(job)['status']=='failed'
+    desktop.fail=None
+    assert w.process(job)['status']=='sent' and desktop.calls==2
+
+
+def test_wrong_group_same_key_is_not_sent_again(tmp_path,job):
+    desktop=Desktop();w=worker(tmp_path,desktop)
+    w.process(job);job['group_id']='g2'
+    assert w.process(job)['status']=='uncertain' and desktop.calls==1
+
+
+def test_group_and_receipt_matching_requires_exact_identifiers():
+    group='玥笙-辽宁-大连中山店'
+    assert exact_group(group+' (12)',group,title=True)
+    assert not exact_group(group+'旗舰',group,title=True)
+    body='【抖音来客｜新订单通知】\n下单时间：2026-10-12 10:00:00\n订单编号：T-1001'
+    anchors=confirmation_anchors(body)
+    assert has_confirmation(body,anchors)
+    assert not has_confirmation(body.replace('1001','1002'),anchors)
+    with pytest.raises(BeforeSendError):confirmation_anchors('没有业务编号的消息')

@@ -1,4 +1,20 @@
-# 抖音来客订单 → 微信群 同步工具
+# 抖音来客门店通知服务
+
+本分支的多企业、多门店通知工具位于 **[`laike-wecom-tool/`](laike-wecom-tool/README.md)**。它提供新订单、新留资、可选状态变化通知，按企业与门店匹配企微外部群，并提供自动任务、中文监控后台和人工处理入口。
+
+云端服务适配 1 vCPU / 2 GiB 的轻量部署；企微发送端运行在另一台已登录企业微信的 Windows 电脑。服务端使用独立 SQLite 数据目录，默认关闭自动同步和自动发送，真实账号接入后再启用。
+
+| 入口 | 内容 |
+| --- | --- |
+| [工具说明与本地启动](laike-wecom-tool/README.md) | 演示、正式实例、Windows 发送端及首次接入 |
+| [从当前 GitHub 分支部署](laike-wecom-tool/docs/GitHub分支部署.md) | 拉取 `feature/laike-wecom-tool`、Docker 启动、维护与更新 |
+| [子域名与 HTTPS](laike-wecom-tool/docs/子域名启动说明.md) | 将 `notify.你的域名` 作为后台入口 |
+| [数据与发送工具接入](laike-wecom-tool/docs/接入说明.md) | 独立留资来源、标准事件、HTTP 发送接口 |
+| [验证记录](laike-wecom-tool/docs/验证记录.md) | 已完成的本地验证与实际账号联调范围 |
+
+本分支的工具命令在 `laike-wecom-tool/` 目录执行，例如 Windows 本地演示可以运行该目录内的 `start-demo.bat`。
+
+## 原有来客订单 → 微信群同步工具
 
 把抖音来客的订单信息**全自动**推送到**微信群**。支持**服务商模式**：一个应用服务多个来客商户，逐商户拉单推送，并解密订单中的客户手机号。
 

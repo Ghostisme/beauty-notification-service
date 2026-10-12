@@ -1,0 +1,12 @@
+{
+  "name": "laike-wecom-tool-checks",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "check:ui": "node scripts/browser-check.cjs",
+    "check:syntax": "node --check toolbox/static/app.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
