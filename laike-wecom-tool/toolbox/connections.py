@@ -78,6 +78,7 @@ def check_douyin(db, client, enterprise_id=None):
             detail += "；请在开放平台应用详情的解决方案中申请订单查询权限"
         elif getattr(exc, "code", "") == "2119013":
             detail += "；请在服务商应用的服务器 IP 白名单中添加实际查询电脑或服务器的公网出口 IP"
+            detail += "；使用代理或 VPN 分流时，请核对抖音请求实际走的出口，通用 IP 检测网站可能返回另一条线路的地址"
         return save_check(db, key, "failed", detail, fingerprint)
 
 

@@ -72,6 +72,9 @@ def test_empty_success_is_distinguished_from_missing_order_array(db, engine, adm
     client, headers = admin
     result = client.post('/api/connections/douyin/check', json={'enterprise_id': 1}, headers=headers).json
     assert result['state'] == 'ready' and '无订单' in result['detail']
+    monkeypatch.setattr(engine.client, 'request', lambda *a, **k: {'error_code': 0, 'description': ''})
+    result = client.post('/api/connections/douyin/check', json={'enterprise_id': 1}, headers=headers).json
+    assert result['state'] == 'ready' and result['metrics']['sample_orders'] == 0
     monkeypatch.setattr(engine.client, 'request', lambda *a, **k: {})
     result = client.post('/api/connections/douyin/check', json={'enterprise_id': 1}, headers=headers).json
     assert result['state'] == 'failed' and '缺少' in result['detail']

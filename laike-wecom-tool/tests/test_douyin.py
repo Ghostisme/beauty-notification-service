@@ -32,6 +32,25 @@ def test_repeated_pages_and_max_pages_fail_without_silent_truncation(db):
     with pytest.raises(RuntimeError,match='上限'):list(client.orders('1001',1,2,max_pages=1))
 
 
+def test_real_empty_time_window_response_is_an_empty_order_page(db):
+    client=DouyinClient(db)
+    client.request=lambda *a,**k:{'error_code':0,'description':''}
+    assert list(client.orders('1001',10,20))==[]
+
+
+@pytest.mark.parametrize('data',[
+    {},
+    {'error_code':0,'orders':None},
+    {'error_code':0,'orders':'not-an-array'},
+    {'error_code':0,'unexpected_orders':[]},
+    {'error_code':0,'page':{'total':3}},
+    {'error_code':0,'search_after':{'CursorValue':['next']}},
+])
+def test_missing_or_malformed_orders_are_not_mistaken_for_explicit_empty_success(data):
+    with pytest.raises(RuntimeError,match='缺少'):
+        DouyinClient.order_items(data)
+
+
 def test_expired_token_refreshes_once_and_merchant_header(db, monkeypatch):
     db.set_settings('douyin',{**db.settings('douyin'),'client_key':'fixture'})
     db.set_secret('douyin_secret','fixture-secret')

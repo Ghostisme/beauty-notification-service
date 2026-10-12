@@ -130,6 +130,11 @@ class DouyinClient:
     def order_items(data):
         items = next((data[k] for k in ("order_list", "orders", "list") if isinstance(data.get(k), list)), None)
         if items is None:
+            # 真实接口在时间窗内无订单时省略 orders/page/search_after，仅返回成功元信息。
+            # 只接受已观察到的明确空响应；未知字段、无成功码或无效数组仍按协议错误处理。
+            if (data.get("error_code") in (0, "0") and data.get("description") in (None, "")
+                    and set(data) <= {"error_code", "description"}):
+                return []
             raise RuntimeError("订单响应缺少 order_list/orders 数组，已保留本企业同步游标")
         if any(not isinstance(item, dict) for item in items):
             raise RuntimeError("订单响应包含无效记录，已保留本企业同步游标")

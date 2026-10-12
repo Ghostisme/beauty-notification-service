@@ -3,6 +3,7 @@
 此模块不注入客户端、不读取客户端数据库。OCR 只在已校准的窗口区域运行。
 """
 import re
+import math
 import time
 import unicodedata
 
@@ -43,6 +44,52 @@ def has_confirmation(ocr_text, anchors):
     value = compact(ocr_text)
     # 不做 OCR 错字的模糊匹配；识别不清时保留“待人工核实”。
     return all(anchor in value for anchor in anchors)
+
+
+def profile_problem(profile, complete=True):
+    """校准区域必须分开，防止把消息内容中的群名当成顶部群标题。"""
+    required = ("search_point", "results_rect", "header_rect", "input_point", "messages_rect", "window_size")
+    if complete and not all(key in profile for key in required):
+        return "请先运行发送端界面校准"
+    size = profile.get("window_size")
+    if not isinstance(size, (list, tuple)) or len(size) != 2 or not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 0 for v in size):
+        return "校准窗口尺寸无效，请重新校准"
+    width, height = size
+    labels = {"search_point": "搜索输入框", "results_rect": "搜索结果区", "header_rect": "群标题区",
+              "input_point": "消息输入框", "messages_rect": "消息显示区"}
+    regions = {}
+    points = {}
+    for key, label in labels.items():
+        if key not in profile:
+            continue
+        value = profile[key]
+        count = 4 if key.endswith("_rect") else 2
+        if not isinstance(value, (list, tuple)) or len(value) != count or not all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in value):
+            return f"{label}坐标无效，请重新校准"
+        if count == 4:
+            x1, y1, x2, y2 = value
+            if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
+                return f"{label}超出企微窗口，请重新框选"
+            regions[key] = value
+        else:
+            x, y = value
+            if not (0 <= x < width and 0 <= y < height):
+                return f"{label}超出企微窗口，请重新选择"
+            points[key] = value
+    if "header_rect" in regions and "messages_rect" in regions:
+        a, b = regions["header_rect"], regions["messages_rect"]
+        if max(a[0], b[0]) < min(a[2], b[2]) and max(a[1], b[1]) < min(a[3], b[3]):
+            return "群标题区与消息显示区重叠，请缩小框选范围；群标题区只能包含顶部群名"
+    for point_key, (x, y) in points.items():
+        for rect_key, (x1, y1, x2, y2) in regions.items():
+            # 搜索弹层与聊天区分属不同界面状态，允许它覆盖聊天区。
+            if rect_key == "results_rect":
+                continue
+            if x1 <= x < x2 and y1 <= y < y2:
+                return f"{labels[point_key]}落在{labels[rect_key]}内，请重新校准并分开区域"
+    return ""
 
 
 class WindowsDesktop:
@@ -114,8 +161,9 @@ class WindowsDesktop:
             return False, "Windows 桌面已锁定，请保持发送电脑会话可交互"
         try:
             hwnd = self.find_window()
-            if not all(k in self.profile for k in ("search_point", "results_rect", "header_rect", "input_point", "messages_rect", "window_size")):
-                return False, "请先运行发送端界面校准"
+            problem = profile_problem(self.profile)
+            if problem:
+                return False, problem
             if self.win32gui.IsIconic(hwnd):
                 return False, "企微窗口已最小化，请展开窗口"
             rect = self.win32gui.GetWindowRect(hwnd)

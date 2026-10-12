@@ -3,7 +3,7 @@ import copy
 import pytest
 import requests
 
-from sender.desktop import BeforeSendError, UncertainSendError, confirmation_anchors, exact_group, has_confirmation
+from sender.desktop import BeforeSendError, UncertainSendError, WindowsDesktop, confirmation_anchors, exact_group, has_confirmation, profile_problem
 from sender.worker import Worker
 
 
@@ -72,6 +72,45 @@ def test_group_and_receipt_matching_requires_exact_identifiers():
     assert has_confirmation(body,anchors)
     assert not has_confirmation(body.replace('1001','1002'),anchors)
     with pytest.raises(BeforeSendError):confirmation_anchors('没有业务编号的消息')
+
+
+@pytest.fixture
+def profile():
+    return {'window_size':[1000,700], 'search_point':[160,38], 'results_rect':[60,60,310,500],
+            'header_rect':[310,0,1000,80], 'messages_rect':[310,80,1000,500], 'input_point':[500,600]}
+
+
+def test_adjacent_calibration_regions_are_allowed_and_partial_selection_can_be_checked(profile):
+    assert not profile_problem(profile)
+    profile['results_rect']=[75,55,475,250]  # 企微搜索弹层可以覆盖右侧聊天区。
+    assert not profile_problem(profile)
+    partial={k:v for k,v in profile.items() if k in ('window_size','search_point','results_rect')}
+    assert not profile_problem(partial,complete=False)
+    assert profile_problem(partial)
+
+
+@pytest.mark.parametrize('change',[
+    {'header_rect':[310,0,1000,700]},
+    {'header_rect':[0,0,1000,80]},
+    {'input_point':[500,400]},
+    {'messages_rect':[310,80,1200,500]},
+    {'search_point':[float('nan'),38]},
+])
+def test_unsafe_calibration_is_rejected(profile,change):
+    profile.update(change)
+    assert profile_problem(profile)
+
+
+def test_title_crop_including_chat_content_stops_before_any_send_action(profile,job):
+    profile['header_rect']=[310,0,1000,700]
+    desktop=WindowsDesktop.__new__(WindowsDesktop)
+    desktop.profile=profile
+    desktop.unlocked=lambda:True
+    desktop.find_window=lambda:1
+    submitted=[]
+    with pytest.raises(BeforeSendError,match='重叠'):
+        desktop.send(job,lambda:submitted.append(True))
+    assert submitted==[]
 
 
 @pytest.mark.parametrize('matching', [True, False])
