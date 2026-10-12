@@ -5,13 +5,6 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$APP_DIR/laike-wecom-tool/deploy/install-pm2.sh" ]; then
-  echo "当前分支使用 laike-wecom-tool 新工具，请按域名迁移说明部署。"
-  echo "文档：$APP_DIR/laike-wecom-tool/docs/notification.hongquanquan.cn迁移.md"
-  echo "准备数据后运行：cd '$APP_DIR/laike-wecom-tool' && bash deploy/install-pm2.sh"
-  echo "旧部署流程未执行。"
-  exit 2
-fi
 DOMAIN="notification.hongquanquan.cn"
 PORT=8787
 REPO="https://github.com/Ghostisme/beauty-notification-service.git"

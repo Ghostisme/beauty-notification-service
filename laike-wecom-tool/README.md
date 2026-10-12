@@ -81,9 +81,7 @@ python -m venv .sender-venv
 
 ## 部署到阿里云
 
-已有 `notification.hongquanquan.cn`、HTTPS 和 PM2 管理的旧 Node.js 网站时，按 [现有域名与 PM2 迁移](docs/notification.hongquanquan.cn迁移.md) 操作。提供独立 PM2 配置、安装入口和复用证书的代理片段；旧 MySQL 留资与日志保留，旧数据导入另按实际表结构处理。
-
-支持 PM2、Docker Compose 和 systemd，按现有环境选择一种。Docker / systemd 的逐步说明、HTTPS 反向代理、备份恢复和日常维护见 [阿里云部署说明](docs/阿里云部署.md)。PM2 配置固定一个 Python 实例，384 MiB 是超限重启阈值；其资源行为与 Docker / systemd 的硬限制不同。
+支持 Docker Compose 和 systemd，二选一。逐步说明、HTTPS 反向代理、备份恢复和日常维护见 [阿里云部署说明](docs/阿里云部署.md)。
 
 从当前本机真实实例迁移到云端，并完成真实订单验收、资源实测和日常操作，按 [部署、实测与日常操作全流程](docs/部署实测与日常操作全流程.md) 顺序执行。该流程采用 Ubuntu 24.04 / Docker Compose，包含保留现有数据库与 Windows 账本的迁移步骤。
 
