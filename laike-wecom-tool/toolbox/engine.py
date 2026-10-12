@@ -505,7 +505,7 @@ class Engine:
                 orders_count += entry["orders"]
                 queued += entry["queued"]
                 details.append(entry)
-            any_progress = any(item.get("orders") or item.get("clues") for item in details)
+            any_progress = any("error" not in item or item.get("orders") or item.get("clues") for item in details)
             status = ("partial" if any_progress else "failed") if errors else "success"
             with self.db.connect(write=True) as c:
                 c.execute("UPDATE task_runs SET status=?,finished_at=?,orders=?,queued=?,errors=?,details=? WHERE id=?",

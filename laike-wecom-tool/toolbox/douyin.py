@@ -154,11 +154,16 @@ class DouyinClient:
         if not start < end or end - start > 365 * 86400:
             raise ValueError("线索查询时间窗必须递增且不超过 365 天")
         path = self.db.settings("douyin")["clue_path"]
-        seen, fetched = set(), 0
+        seen, fetched, expected_total = set(), 0, None
         for page in range(1, min(max_pages, 100) + 1):
             data = self.request("GET", path, account_id, params={
                 "account_id": str(account_id), "start_time": time_text(start), "end_time": time_text(end),
                 "page": page, "page_size": 100})
+            # 真实空时间窗仅返回 error_code=0 和 description，不包含 clue_data/page。
+            if "clue_data" not in data and data.get("error_code") in (0, "0") and set(data) <= {"error_code", "description"}:
+                if expected_total is not None and fetched < expected_total:
+                    raise RuntimeError("线索分页提前结束，已保留线索游标")
+                return
             items = data.get("clue_data")
             if not isinstance(items, list) or any(not isinstance(x, dict) for x in items):
                 raise RuntimeError("线索响应缺少有效 clue_data 数组，已保留线索游标")
@@ -171,7 +176,11 @@ class DouyinClient:
             fetched += len(items)
             info = data.get("page") if isinstance(data.get("page"), dict) else {}
             total = info.get("total")
-            if not items or (total is not None and fetched >= int(total)):
+            if total is not None:
+                expected_total = int(total)
+            if not items and expected_total is not None and fetched < expected_total:
+                raise RuntimeError("线索分页提前结束，已保留线索游标")
+            if not items or (expected_total is not None and fetched >= expected_total):
                 return
             if total is None and len(items) < 100:
                 return

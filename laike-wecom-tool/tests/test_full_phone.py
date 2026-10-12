@@ -75,6 +75,42 @@ def test_clue_cannot_change_merchant_identity_or_invent_a_current_timestamp():
         normalize_clue(raw, "1001")
 
 
+@pytest.mark.parametrize("response", [
+    {"error_code": 0, "description": "success"}, {"clue_data": [], "page": {"total": 0}}])
+def test_real_empty_clue_window_is_success(db, response):
+    client = DouyinClient(db)
+    client.request = lambda *a, **k: response
+    assert list(client.clues("1001", 1, 2)) == []
+
+
+@pytest.mark.parametrize("response", [{}, {"clue_data": None}, {"clue_data": "bad"}, {"error_code": 0, "unknown": []}])
+def test_malformed_clue_response_is_not_mistaken_for_an_empty_window(db, response):
+    client = DouyinClient(db)
+    client.request = lambda *a, **k: response
+    with pytest.raises(RuntimeError, match="clue_data"):
+        list(client.clues("1001", 1, 2))
+
+
+@pytest.mark.parametrize("last_page", [{"error_code": 0, "description": "success"}, {"clue_data": [], "page": {"total": 101}}])
+def test_empty_page_cannot_silently_discard_expected_clues(db, last_page):
+    client = DouyinClient(db)
+    pages = iter([{"clue_data": [clue(str(i)) for i in range(100)], "page": {"total": 101}}, last_page])
+    client.request = lambda *a, **k: next(pages)
+    with pytest.raises(RuntimeError, match="提前结束"):
+        list(client.clues("1001", 1, 2))
+
+
+def test_successful_empty_merchant_and_failed_merchant_report_partial(engine):
+    class Client:
+        def orders(self, account, *args):
+            if account == "1002":
+                raise PlatformError(2119005, "未授权")
+            return iter([])
+    engine.client = Client()
+    result = engine.run_sync()
+    assert result["orders"] == 0 and result["status"] == "partial" and result["errors"] == 1
+
+
 def test_order_joins_full_phone_only_with_same_merchant_order_and_store(engine, db, order):
     require_phone(db)
     engine.ingest_event(normalize_clue(clue(account="1002"), "1002"))
