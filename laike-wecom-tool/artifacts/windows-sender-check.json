@@ -4,5 +4,7 @@
   "desktop_ready": false,
   "desktop_detail": "请先运行发送端界面校准",
   "actual_wecom_send_tested": false,
-  "desktop_checked_at": "2026-10-12T10:56:21.775233+00:00"
+  "desktop_checked_at": "2026-10-12T11:29:03.153311+00:00",
+  "formal_server_connected": true,
+  "test_scope": "exact_group_name"
 }

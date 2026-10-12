@@ -18,8 +18,8 @@ def configure(path, test_only=False):
     config={"server":server,"token":token,"worker_id":"windows-wecom-1","label":"Windows 企微发送端",
             "data_dir":"sender-data","profile":"sender-data/desktop-profile.json","poll_seconds":3}
     if test_only:
-        from toolbox.testing import TEST_GROUP_ID
-        config["group_ids"] = [TEST_GROUP_ID]
+        from toolbox.testing import TEST_GROUP_NAME
+        config["group_names"] = [TEST_GROUP_NAME]
         config["label"] = "壹心测试群发送端"
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
@@ -41,8 +41,9 @@ def main():
     if not path.exists():parser.error("请先运行 sender.py --configure")
     config=json.loads(path.read_text(encoding="utf-8"))
     if args.test_only:
-        from toolbox.testing import TEST_GROUP_ID
-        config["group_ids"] = [TEST_GROUP_ID]
+        from toolbox.testing import TEST_GROUP_NAME
+        config.pop("group_ids", None)
+        config["group_names"] = [TEST_GROUP_NAME]
         config["label"] = "壹心测试群发送端"
     if args.calibrate:
         from sender.calibrate import calibrate
@@ -50,7 +51,15 @@ def main():
     from sender.worker import Worker
     worker=Worker(config)
     if args.check:
-        ready,detail=worker.desktop.ready();print(json.dumps({"ready":ready,"detail":detail},ensure_ascii=False));return
+        from toolbox.domain import error_text
+        try:
+            ready=worker.heartbeat()
+            detail=worker.readiness_detail
+            print(json.dumps({"server_connected":True,"ready":ready,"detail":detail},ensure_ascii=False))
+        except Exception as exc:
+            print(json.dumps({"server_connected":False,"ready":False,
+                              "detail":error_text(exc,(worker.token,))},ensure_ascii=False))
+        return
     from run import process_lock
     try:lock=process_lock(worker.data.resolve())
     except OSError:parser.error("此发送端数据目录已有实例运行，请先关闭重复进程")

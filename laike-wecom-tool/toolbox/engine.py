@@ -7,6 +7,7 @@ import uuid
 import requests
 
 from .db import dumps
+from .connections import identity, save_check
 from .defaults import EVENT_NAMES, ORDER_STATUSES
 from .domain import epoch, error_text, event_key, normalize_order, public_phone, render, text
 from .douyin import DouyinClient
@@ -311,7 +312,11 @@ class Engine:
         details, orders_count, queued, errors = [], 0, 0, 0
         try:
             enterprises = self.db.rows("SELECT * FROM enterprises WHERE enabled=1 AND is_test=0 ORDER BY id")
+            if not enterprises:
+                raise ValueError("尚未添加正式企业，无法查询真实抖音订单")
             for enterprise in enterprises:
+                app_identity = identity(self.db)
+                order_identity = identity(self.db, enterprise["account_id"])
                 start = enterprise["sync_cursor"] - 180 if enterprise["sync_cursor"] else now - cfg["lookback_minutes"] * 60
                 # 拆小时间窗。服务器长时间停机后逐轮追赶，成功后才推进该企业游标。
                 end = min(now - 3, start + 86400)
@@ -340,11 +345,15 @@ class Engine:
                         c.execute("UPDATE enterprises SET sync_cursor=?,last_sync=?,last_error=? WHERE id=?", (end, time.time(), warning, enterprise["id"]))
                     if warning:
                         entry["warning"] = warning
+                    save_check(self.db, "douyin_app", "ready", "真实订单同步已成功调用抖音接口", app_identity)
+                    save_check(self.db, "orders_" + str(enterprise["id"]), "ready",
+                               f"真实同步成功，读取 {entry['orders']} 条订单，生成 {entry['queued']} 条通知" + ("；" + warning if warning else ""), order_identity)
                 except Exception as e:
                     errors += 1
                     entry["error"] = error_text(e, (self.db.secret("douyin_secret"),))
                     with self.db.connect(write=True) as c:
                         c.execute("UPDATE enterprises SET last_error=? WHERE id=?", (entry["error"], enterprise["id"]))
+                    save_check(self.db, "orders_" + str(enterprise["id"]), "failed", entry["error"], order_identity)
                 orders_count += entry["orders"]
                 queued += entry["queued"]
                 details.append(entry)

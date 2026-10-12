@@ -98,9 +98,7 @@ class DouyinClient:
                 params["cursor"] = ",".join(str(v) for v in cursor) if isinstance(cursor, list) else str(cursor)
                 params["page_num"] = 1
             data = self.request("GET", cfg["order_path"], account_id, params=params)
-            items = next((data[k] for k in ("order_list", "orders", "list") if isinstance(data.get(k), list)), None)
-            if items is None:
-                raise RuntimeError("订单响应缺少 order_list/orders 数组，已保留本企业同步游标")
+            items = self.order_items(data)
             signature = tuple(str(v.get("order_id")) for v in items if isinstance(v, dict))
             if signature and signature in seen_pages:
                 raise RuntimeError("抖音返回重复订单页，已停止本轮同步并保留游标")
@@ -127,6 +125,15 @@ class DouyinClient:
             cursor = next_cursor
             page += 1
         raise RuntimeError("本轮达到订单分页上限，已保留游标；请缩短同步时间窗或增加分页上限")
+
+    @staticmethod
+    def order_items(data):
+        items = next((data[k] for k in ("order_list", "orders", "list") if isinstance(data.get(k), list)), None)
+        if items is None:
+            raise RuntimeError("订单响应缺少 order_list/orders 数组，已保留本企业同步游标")
+        if any(not isinstance(item, dict) for item in items):
+            raise RuntimeError("订单响应包含无效记录，已保留本企业同步游标")
+        return items
 
     def decrypt_orders(self, orders, account_id):
         """仅调用平台批量解密能力；没有权限时保留原值并返回可查看的错误。"""

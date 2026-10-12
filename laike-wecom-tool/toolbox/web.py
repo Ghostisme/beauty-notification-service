@@ -15,6 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import __version__
 from .db import Database, dumps
+from .connections import check_douyin, report
 from .defaults import SETTINGS, STATUS_LABELS, TEMPLATES, VARIABLES
 from .domain import error_text, render, text, validate_template
 from .engine import Conflict, Engine
@@ -59,6 +60,7 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
     app.config["DEMO_MODE"] = demo
     failures = defaultdict(deque)
     failures_lock = threading.Lock()
+    connection_check_lock = threading.Lock()
 
     def admin(fn):
         @functools.wraps(fn)
@@ -342,6 +344,29 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
         settings["channel"]["token_configured"] = bool(db.secret("http_token"))
         return jsonify(settings)
 
+    @app.get("/api/connections")
+    @admin
+    def connection_report():
+        return jsonify(report(db, demo))
+
+    @app.post("/api/connections/douyin/check")
+    @admin
+    def connection_check():
+        if demo:
+            raise Conflict("真实接入检查需要正式实例；离线演示不会调用抖音")
+        data = body()
+        enterprise_id = data.get("enterprise_id")
+        if enterprise_id is not None:
+            enterprise_id = integer(enterprise_id, 1, 2147483647, "企业 ID")
+        if not connection_check_lock.acquire(blocking=False):
+            raise Conflict("已有抖音连接检查正在进行，请等待结果")
+        try:
+            result = check_douyin(db, engine.client, enterprise_id)
+            db.audit("检查真实抖音连接", enterprise_id or "app", result["state"])
+            return jsonify(result)
+        finally:
+            connection_check_lock.release()
+
     @app.put("/api/config/<section>")
     @admin
     def config_update(section):
@@ -444,6 +469,11 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
     @app.post("/api/tasks/run")
     @admin
     def run_task():
+        if not demo:
+            if not db.one("SELECT 1 FROM enterprises WHERE enabled=1 AND is_test=0"):
+                raise ValueError("请先添加已授权的正式企业，再同步真实订单")
+            if not db.settings("douyin")["client_key"] or not db.secret("douyin_secret"):
+                raise ValueError("请先填写真实抖音应用的 Client Key 和 Client Secret")
         engine.launch_sync("manual")
         return jsonify(accepted=True), 202
 
@@ -485,7 +515,11 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
     @app.post("/api/ingest")
     @bearer("ingest_token")
     def ingest():
-        return jsonify(engine.ingest_event(body()))
+        data = body()
+        result = engine.ingest_event(data)
+        if data.get("type") == "new_lead":
+            db.set_settings("connection_check_lead_ingest", {"checked_at": time.time()})
+        return jsonify(result)
 
     @app.post("/api/relay/heartbeat")
     @bearer("relay_token")
@@ -518,6 +552,8 @@ def create_app(directory=None, password=None, start_engine=False, demo=False):
         if demo or db.settings("channel")["mode"] != "relay":
             return jsonify(job=None)
         groups = json.loads(worker["groups_json"])
+        if not groups:
+            return jsonify(job=None)
         return jsonify(job=engine.claim(worker_id, groups))
 
     @app.post("/api/relay/result")

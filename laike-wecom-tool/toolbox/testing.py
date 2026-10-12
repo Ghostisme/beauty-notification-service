@@ -12,8 +12,10 @@ def test_group(db):
     store = db.one("SELECT s.*,e.account_id,e.name AS enterprise_name,e.is_test FROM stores s "
                    "JOIN enterprises e ON e.id=s.enterprise_id WHERE e.account_id=? AND e.is_test=1 AND s.poi_id=?",
                    (TEST_ACCOUNT_ID, TEST_POI_ID))
+    actual = db.one("SELECT s.id,s.name,e.name AS enterprise_name FROM stores s "
+                    "JOIN enterprises e ON e.id=s.enterprise_id WHERE s.group_name=? AND e.is_test=0", (TEST_GROUP_NAME,))
     return {"group_name": TEST_GROUP_NAME, "group_id": TEST_GROUP_ID,
-            "configured": bool(store), "store": store}
+            "configured": bool(store), "store": store, "real_store_binding": actual}
 
 
 def prepare_test_group(db):

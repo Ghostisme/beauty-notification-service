@@ -72,3 +72,34 @@ def test_group_and_receipt_matching_requires_exact_identifiers():
     assert has_confirmation(body,anchors)
     assert not has_confirmation(body.replace('1001','1002'),anchors)
     with pytest.raises(BeforeSendError):confirmation_anchors('没有业务编号的消息')
+
+
+@pytest.mark.parametrize('matching', [True, False])
+def test_test_group_name_scope_works_for_real_merchant_and_never_expands_when_missing(tmp_path, matching):
+    from toolbox.testing import TEST_GROUP_NAME
+    w=Worker({'server':'http://127.0.0.1:1','token':'fixture','data_dir':str(tmp_path),
+              'group_names':[TEST_GROUP_NAME]}, Desktop())
+    sent=[]
+    def request(path, body=None):
+        if path.endswith('/groups'):
+            groups=[{'group_id':'business-group-1','group_name':'其他门店群'}]
+            if matching:groups.append({'group_id':'real-test-store-group','group_name':TEST_GROUP_NAME})
+            return {'items':groups}
+        sent.append(body);return {'ok':True}
+    w.request=request
+    assert w.heartbeat() is matching
+    assert sent[0]['groups'] == (['real-test-store-group'] if matching else [])
+    assert sent[0]['ready'] is matching
+    assert w.desktop.calls==0
+
+
+def test_missing_test_group_does_not_call_claim(tmp_path):
+    from toolbox.testing import TEST_GROUP_NAME
+    w=Worker({'server':'http://127.0.0.1:1','token':'fixture','data_dir':str(tmp_path),
+              'group_names':[TEST_GROUP_NAME]}, Desktop())
+    calls=[]
+    def request(path, body=None):
+        calls.append(path)
+        return {'items':[{'group_id':'other','group_name':'其他门店群'}]} if path.endswith('/groups') else {'ok':True}
+    w.request=request;w.run(once=True)
+    assert '/api/relay/claim' not in calls and w.desktop.calls==0

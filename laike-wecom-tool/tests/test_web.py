@@ -63,6 +63,14 @@ def test_manual_lead_renders_phone_and_audits(admin, db):
     assert db.one("SELECT action FROM audit ORDER BY id DESC")["action"]=="手工录入留资"
 
 
+def test_empty_sender_scope_never_claims_other_stores(app, db, engine):
+    client=app.test_client();headers={'Authorization':'Bearer '+db.secret('relay_token')}
+    engine.ingest_event(lead());delivery(db)
+    client.post('/api/relay/heartbeat',json={'worker_id':'empty-scope','ready':True,'groups':[]},headers=headers)
+    assert client.post('/api/relay/claim',json={'worker_id':'empty-scope'},headers=headers).json['job'] is None
+    assert db.one('SELECT status FROM messages')['status']=='pending'
+
+
 def test_no_public_data_in_static_health_and_headers(app):
     c=app.test_client()
     assert set(c.get('/health').json)=={'status','version'}

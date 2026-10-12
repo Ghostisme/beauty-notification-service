@@ -139,5 +139,14 @@ def test_sender_test_only_flag_overrides_existing_group_scope(tmp_path, monkeypa
     monkeypatch.setattr(sender.worker, 'Worker', Worker)
     monkeypatch.setattr(sys, 'argv', ['sender.py','--config',str(path),'--test-only','--once'])
     runpy.run_path(str(Path(__file__).resolve().parents[1]/'sender.py'), run_name='__main__')
-    assert observed['group_ids'] == [TEST_GROUP_ID] and observed['once'] is True
+    assert 'group_ids' not in observed and observed['group_names'] == [TEST_GROUP_NAME] and observed['once'] is True
     assert json.loads(path.read_text(encoding='utf-8')) == config
+
+
+def test_real_store_binding_is_identified_without_replacing_it(admin, db):
+    client, _ = admin
+    with db.connect(write=True) as connection:
+        connection.execute('UPDATE stores SET group_name=? WHERE id=1', (TEST_GROUP_NAME,))
+    profile = client.get('/api/test-group').json
+    assert profile['real_store_binding']['id'] == 1 and not profile['configured']
+    assert db.one('SELECT COUNT(*) AS n FROM enterprises WHERE is_test=1')['n'] == 0

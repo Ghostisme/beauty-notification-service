@@ -155,13 +155,20 @@ async function tasksPage() {
   <section class="panel section-gap"><div class="panel-head"><h2>任务运行记录</h2><span class="muted">显示最近 50 轮</span></div>${runTable(tasks.items)}</section>`;
 }
 
+function connectionPanel(report) {
+  const labels={ready:'已就绪',failed:'检查失败',unverified:'待验证',unconfigured:'待接入',partial:'部分就绪',paused:'已暂停',blocked:'不可用'};
+  return `<section class="panel connection-panel"><div class="panel-head"><h2>真实接入检查</h2><button class="text-button small-button" data-action="refresh">刷新检查状态</button></div><div class="connection-note">应用凭证、商家授权和发送结果分别验证。填写配置只代表已保存；测试记录和人工确认不会计入实际业务自动发送证明。</div><div class="table-wrap"><table><thead><tr><th>环节</th><th>状态</th><th>实际检查结果</th><th>操作</th></tr></thead><tbody>${report.items.map(item=>`<tr><td class="nowrap">${esc(item.name)}</td><td><span class="badge ${item.state==='ready'?'green':item.state==='failed'?'red':'amber'}">${labels[item.state]||esc(item.state)}</span></td><td><div class="connection-detail">${esc(item.detail)}</div>${item.checked_at?`<div class="cell-sub">最近验证：${fmt(item.checked_at)}</div>`:''}</td><td>${item.check_enterprise_id!==undefined?`<button class="text-button" data-check-douyin="${item.check_enterprise_id}"${report.demo?' disabled':''}>${item.check_enterprise_id?'验证订单权限':'验证应用凭证'}</button>`:''}</td></tr>`).join('')}</tbody></table></div></section>`;
+}
+
 async function settingsPage() {
-  const c=await api('/api/config'); state.config=c;
+  const results=await Promise.allSettled([api('/api/config'),api('/api/connections')]);
+  for(const result of results) if(result.status==='rejected') throw result.reason;
+  const c=results[0].value; state.config=c;
   return heading('接入设置','连接抖音服务商应用，并选择企微消息的发送方式。','','连接管理 / CONNECTIONS')+
-  `<div class="split-layout"><div class="settings-stack"><section class="panel form-panel"><h2>抖音来客服务商应用</h2><p>每家合作企业需要单独授权该应用。</p><form id="douyin-form"><label>Client Key<input name="client_key" value="${esc(c.douyin.client_key)}" autocomplete="off"></label><label>Client Secret <span class="token-status">${c.douyin.secret_configured?'已保存':'尚未配置'}</span><input name="client_secret" type="password" placeholder="${c.douyin.secret_configured?'留空保留原凭证':'填写应用密钥'}" autocomplete="new-password"></label><label>金额单位<select name="amount_unit"><option value="fen"${selected(c.douyin.amount_unit,'fen')}>分（收到 9900，显示 ¥99.00）</option><option value="yuan"${selected(c.douyin.amount_unit,'yuan')}>元（收到 99，显示 ¥99.00）</option></select></label><label class="check-label"><input name="decrypt_enabled" type="checkbox"${checked(c.douyin.decrypt_enabled)}>启用平台手机号批量解密能力</label><details class="details"><summary>接口地址设置</summary><label>开放平台地址<input name="base_url" value="${esc(c.douyin.base_url)}"></label><label>订单查询路径<input name="order_path" value="${esc(c.douyin.order_path)}"></label><label>批量解密路径<input name="decrypt_path" value="${esc(c.douyin.decrypt_path)}"></label></details><div class="form-actions"><button class="primary" type="submit">保存抖音设置</button></div></form></section>
+  connectionPanel(results[1].value)+`<div class="split-layout"><div class="settings-stack"><section class="panel form-panel"><h2>抖音来客服务商应用</h2><p>每家合作企业需要单独授权该应用。</p><form id="douyin-form"><label>Client Key<input name="client_key" value="${esc(c.douyin.client_key)}" autocomplete="off"></label><label>Client Secret <span class="token-status">${c.douyin.secret_configured?'已保存':'尚未配置'}</span><input name="client_secret" type="password" placeholder="${c.douyin.secret_configured?'留空保留原凭证':'填写应用密钥'}" autocomplete="new-password"></label><label>金额单位<select name="amount_unit"><option value="fen"${selected(c.douyin.amount_unit,'fen')}>分（收到 9900，显示 ¥99.00）</option><option value="yuan"${selected(c.douyin.amount_unit,'yuan')}>元（收到 99，显示 ¥99.00）</option></select></label><label class="check-label"><input name="decrypt_enabled" type="checkbox"${checked(c.douyin.decrypt_enabled)}>启用平台手机号批量解密能力</label><details class="details"><summary>接口地址设置</summary><label>开放平台地址<input name="base_url" value="${esc(c.douyin.base_url)}"></label><label>订单查询路径<input name="order_path" value="${esc(c.douyin.order_path)}"></label><label>批量解密路径<input name="decrypt_path" value="${esc(c.douyin.decrypt_path)}"></label></details><div class="form-actions"><button class="primary" type="submit">保存抖音设置</button></div></form></section>
   <section class="panel form-panel"><h2>独立留资数据接入</h2><p>留资通过接入接口或手工录入进入系统，预约订单不会自动算作留资。</p><div class="subtitle">接收地址：<span class="inline-code">POST /api/ingest</span></div><div class="form-actions"><button data-token="ingest">查看留资接入令牌</button><button data-action="manual-lead" class="soft">手工录入留资</button></div><div id="token-ingest"></div><p class="details">上游需提供商户账号、留资编号、门店 ID 和留资内容。完整格式见随程序交付的接入说明。</p></section></div>
-  <div class="settings-stack"><section class="panel form-panel"><h2>企微外部群发送</h2><p>支持自建 Windows 发送端，也可连接现有发送工具。</p><form id="channel-form"><label>发送方式<select name="mode"><option value="relay"${selected(c.channel.mode,'relay')}>Windows 企微发送端</option><option value="http"${selected(c.channel.mode,'http')}>已有工具的 HTTP 接口</option></select></label><label>HTTP 发送地址<input name="http_url" value="${esc(c.channel.http_url)}" placeholder="https://发送工具地址/send"><small>使用 Windows 发送端时可留空。</small></label><label>HTTP 接入令牌 <span class="token-status">${c.channel.token_configured?'已保存':'尚未配置'}</span><input name="http_token" type="password" autocomplete="new-password" placeholder="留空保留原令牌"></label><div class="form-grid"><label>消息间隔（秒）<input name="interval_seconds" type="number" min="1" max="300" value="${c.channel.interval_seconds}"></label><label>失败最多尝试<input name="max_attempts" type="number" min="1" max="10" value="${c.channel.max_attempts}"></label><label>请求超时（秒）<input name="timeout_seconds" type="number" min="5" max="60" value="${c.channel.timeout_seconds}"></label><label>回执等待（秒）<input name="lease_seconds" type="number" min="60" max="900" value="${c.channel.lease_seconds}"></label></div><button class="primary" type="submit">保存发送设置</button></form></section>
-  <section class="panel form-panel"><h2>Windows 发送端连接</h2><div class="step"><span class="step-number">1</span><div><h3>在常开电脑登录企业微信</h3><p>发送账号需要加入相应门店外部群，桌面保持可交互。</p></div></div><div class="step"><span class="step-number">2</span><div><h3>配置连接并校准界面</h3><p>使用随程序附带的发送端和校准工具，核对搜索区域、群标题和消息输入框。</p></div></div><div class="step"><span class="step-number">3</span><div><h3>先验证测试群，再开启自动发送</h3><p>发送端精确核对群名，发送后回报群内消息的确认结果。</p></div></div><button data-token="relay">查看发送端接入令牌</button><div id="token-relay"></div></section></div></div>`;
+  <div class="settings-stack"><section class="panel form-panel"><h2>企微外部群发送</h2><p>支持自建 Windows 发送端，也可连接现有发送工具。</p><form id="channel-form"><label>发送方式<select name="mode"><option value="relay"${selected(c.channel.mode,'relay')}>Windows 企微发送端</option><option value="http"${selected(c.channel.mode,'http')}>已有工具的 HTTP 接口</option></select></label><p id="relay-help" class="subtitle"${c.channel.mode==='http'?' hidden':''}>Windows 发送端无需填写 HTTP 接口；使用下方的服务器地址和发送端接入令牌连接。</p><div id="http-fields"${c.channel.mode==='relay'?' hidden':''}><label>HTTP 发送地址<input name="http_url" value="${esc(c.channel.http_url)}" placeholder="https://发送工具地址/send"><small>使用 Windows 发送端时可留空。</small></label><label>HTTP 接入令牌 <span class="token-status">${c.channel.token_configured?'已保存':'尚未配置'}</span><input name="http_token" type="password" autocomplete="new-password" placeholder="留空保留原令牌"></label></div><div class="form-grid"><label>消息间隔（秒）<input name="interval_seconds" type="number" min="1" max="300" value="${c.channel.interval_seconds}"></label><label>失败最多尝试<input name="max_attempts" type="number" min="1" max="10" value="${c.channel.max_attempts}"></label><label>请求超时（秒）<input name="timeout_seconds" type="number" min="5" max="60" value="${c.channel.timeout_seconds}"></label><label>回执等待（秒）<input name="lease_seconds" type="number" min="60" max="900" value="${c.channel.lease_seconds}"></label></div><button class="primary" type="submit">保存发送设置</button></form></section>
+  <section class="panel form-panel"><h2>Windows 发送端连接</h2><label>发送端服务器地址<input readonly aria-label="发送端服务器地址" value="${esc(location.origin)}"><small>发送端和后台在当前这台电脑时，可使用此本机地址。</small></label><p class="subtitle">下方令牌由本工具提供，复制到发送电脑的连接配置中。</p><div class="step"><span class="step-number">1</span><div><h3>在常开电脑登录企业微信</h3><p>发送账号需要加入相应门店外部群，桌面保持可交互。</p></div></div><div class="step"><span class="step-number">2</span><div><h3>配置连接并校准界面</h3><p>使用随程序附带的发送端和校准工具，核对搜索区域、群标题和消息输入框。</p></div></div><div class="step"><span class="step-number">3</span><div><h3>先验证测试群，再开启自动发送</h3><p>发送端精确核对群名，发送后回报群内消息的确认结果。</p></div></div><button data-token="relay">查看发送端接入令牌</button><div id="token-relay"></div></section></div></div>`;
 }
 
 function enterpriseModal(id) {
@@ -185,6 +192,10 @@ async function leadModal() {
 }
 async function testModal() {
   const profile=await api('/api/test-group');
+  if(profile.real_store_binding) {
+    openModal('测试群已绑定真实门店',`<p>接收群：<strong>${esc(profile.group_name)}</strong></p><p>该群已经绑定 ${esc(profile.real_store_binding.enterprise_name)} 的 ${esc(profile.real_store_binding.name)}。</p><p class="subtitle">当前使用真实商户和门店 ID。请先在接入设置验证订单权限，再同步真实订单；无需创建模拟企业或替换现有绑定。</p><div class="form-actions"><button class="primary" data-action="open-live-connections">查看真实接入状态</button><button data-action="close-modal">关闭</button></div>`);
+    return;
+  }
   if(!profile.configured) {
     openModal('配置专用测试群',`<p>测试接收群：<strong>${esc(profile.group_name)}</strong></p><p class="subtitle">配置后可以测试新订单、新留资和状态变化通知，使用模拟数据，无需填写真实抖音商户或门店 ID。</p><div class="form-actions"><button class="primary" data-action="prepare-test-group">配置此测试群</button><button data-action="close-modal">取消</button></div>`);
     return;
@@ -205,6 +216,16 @@ document.addEventListener('click',async event=>{
     if(button.dataset.editStore) {storeModal(Number(button.dataset.editStore));return;}
     if(button.dataset.template) {state.selectedTemplate=button.dataset.template;await navigate('templates',true);return;}
     if(button.dataset.variable) {const editor=$('#template-body');const value='{'+button.dataset.variable+'}';editor.setRangeText(value,editor.selectionStart,editor.selectionEnd,'end');editor.focus();return;}
+    if(button.dataset.checkDouyin!==undefined) {
+      button.disabled=true;button.textContent='正在检查…';
+      try {
+        const enterprise=Number(button.dataset.checkDouyin);
+        const result=await api('/api/connections/douyin/check',{method:'POST',body:enterprise?{enterprise_id:enterprise}:{}});
+        if(state.page==='settings')await navigate('settings',true);
+        toast(result.detail,result.state==='failed');
+      } finally {button.disabled=false;}
+      return;
+    }
     if(button.dataset.token) {
       const name=button.dataset.token; const result=await api('/api/connection-token/'+name,{method:'POST',body:{}});
       $('#token-'+name).innerHTML=`<textarea class="connection-token" readonly aria-label="接入令牌">${esc(result.token)}</textarea><button class="text-button small-button" data-copy-token="${name}">复制令牌</button>`;return;
@@ -231,6 +252,7 @@ document.addEventListener('click',async event=>{
     const action=button.dataset.action;
     if(action==='refresh')await navigate(state.page,true);
     if(action==='close-modal')closeModal();
+    if(action==='open-live-connections') {closeModal();location.hash='settings';}
     if(action==='add-enterprise')enterpriseModal();
     if(action==='add-store')storeModal();
     if(action==='manual-lead')await leadModal();
@@ -247,6 +269,9 @@ document.addEventListener('click',async event=>{
 
 document.addEventListener('change',event=>{
   if(event.target.id==='lead-enterprise')$('#lead-store').innerHTML=storeOptions('',event.target.value);
+  if(event.target.matches('#channel-form select[name=mode]')) {
+    const http=event.target.value==='http';$('#http-fields').hidden=!http;$('#relay-help').hidden=http;
+  }
 });
 
 document.addEventListener('submit',async event=>{
@@ -282,7 +307,7 @@ $('#logout-button').addEventListener('click',async()=>{try{await api('/api/logou
 window.addEventListener('hashchange',()=>{if(state.csrf)navigate(location.hash.slice(1)||'dashboard');});
 
 async function startApp() {
-  const info=await api('/api/session');state.csrf=info.csrf;state.demo=info.demo;$('#demo-badge').hidden=!info.demo;$('#version').textContent='v'+info.version;
+  const info=await api('/api/session');state.csrf=info.csrf;state.demo=info.demo;$('#demo-badge').hidden=false;$('#demo-badge').textContent=info.demo?'离线演示环境':'正式环境';$('#demo-badge').className='badge '+(info.demo?'amber':'green');$('#version').textContent='v'+info.version;
   $('#login-view').hidden=true;$('#app-view').hidden=false;
   await navigate(location.hash.slice(1)||'dashboard');
   clearInterval(refreshTimer);refreshTimer=setInterval(()=>{if(!document.hidden&&!$('#modal').open&&['dashboard','messages'].includes(state.page))navigate(state.page,true);},10000);

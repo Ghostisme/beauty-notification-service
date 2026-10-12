@@ -54,6 +54,7 @@ class Worker:
         profile_path=Path(config.get("profile","sender-data/desktop-profile.json"))
         self.desktop=desktop or WindowsDesktop(json.loads(profile_path.read_text(encoding="utf-8")) if profile_path.exists() else {})
         self.groups=[]
+        self.readiness_detail="等待检查"
         self.groups_at=0
         self.groups_lock=threading.Lock()
         self.network=threading.local()
@@ -77,8 +78,14 @@ class Worker:
                 self.groups=self.request("/api/relay/groups")["items"]
                 self.groups_at=time.monotonic()
         allow=self.config.get("group_ids")
-        groups=[g["group_id"] for g in self.groups if allow is None or g["group_id"] in allow]
+        names=self.config.get("group_names")
+        groups=[g["group_id"] for g in self.groups
+                if (allow is None or g["group_id"] in allow) and (names is None or g["group_name"] in names)]
         ready,detail=self.desktop.ready()
+        if not groups:
+            ready=False
+            detail="没有匹配的接收群配置，请在后台绑定本发送端负责的门店群"
+        self.readiness_detail=detail
         self.request("/api/relay/heartbeat",{"worker_id":self.id,"label":self.config.get("label","Windows 企微发送端"),"ready":ready,"detail":detail,"groups":groups})
         return ready
 
@@ -137,8 +144,7 @@ class Worker:
                     ready,_=self.desktop.ready()
                     if ready:
                         # 每次领取前更新 ready，桌面锁定或被占用时不领取任务。
-                        self.heartbeat()
-                        job=self.request("/api/relay/claim",{"worker_id":self.id}).get("job")
+                        job=self.request("/api/relay/claim",{"worker_id":self.id}).get("job") if self.heartbeat() else None
                         if job:self.process(job);idle=0
                         else:idle=min(idle+1,4)
                     else:idle=4
