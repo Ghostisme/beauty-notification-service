@@ -83,6 +83,8 @@ python -m venv .sender-venv
 
 支持 Docker Compose 和 systemd，二选一。逐步说明、HTTPS 反向代理、备份恢复和日常维护见 [阿里云部署说明](docs/阿里云部署.md)。
 
+当前使用现有阿里云服务器与 `https://notification.hongquanquan.cn`，按原有 Docker Compose 方式运行。域名的 DNS、HTTPS 证书和续期沿用现有配置，只将该站点的应用代理转到 `http://127.0.0.1:8790`，操作见 [现成 HTTPS 域名接入](docs/部署实测与日常操作全流程.md#7-配置-https-后台入口)。
+
 从当前本机真实实例迁移到云端，并完成真实订单验收、资源实测和日常操作，按 [部署、实测与日常操作全流程](docs/部署实测与日常操作全流程.md) 顺序执行。该流程采用 Ubuntu 24.04 / Docker Compose，包含保留现有数据库与 Windows 账本的迁移步骤。
 
 本工具位于 `Ghostisme/beauty-notification-service` 仓库的 `feature/laike-wecom-tool` 分支、`laike-wecom-tool/` 子目录。从 GitHub 拉取并部署时，按 [GitHub 分支部署说明](docs/GitHub分支部署.md) 使用对应目录；下面的 `/opt/laike-wecom-tool` 是独立程序包的部署路径。

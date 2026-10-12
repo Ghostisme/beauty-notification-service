@@ -31,11 +31,15 @@ sudo cat data/.bootstrap-password
 
 ## 2. 绑定子域名
 
-以 `notify.1231.com` 为例，在实际 DNS 管理服务商中新增主机记录 `notify`、记录类型 `A`、记录值为服务器公网 IPv4 的解析。
+当前后台地址为 `https://notification.hongquanquan.cn`，该域名已有 DNS 与 HTTPS 配置。完成第 1 节的服务启动后，在现有站点的 HTTPS 配置中将应用代理转到 `http://127.0.0.1:8790`，保留证书、续期与 HTTP 到 HTTPS 跳转。不要为同一个域名再建立第二个站点。
 
-在服务器上为该子域名配置 Nginx 站点或面板反向代理，目标为 `http://127.0.0.1:8790`。先让 HTTP 站点和 DNS 生效，再申请并安装子域名的 HTTPS 证书，最后开启 HTTPS 跳转。阿里云安全组和服务器防火墙允许 80、443 端口。
+新工具同时提供页面、静态资源和 API，因此这些应用请求都要转到 8790；旧 `/api/` 或静态资源路由若仍指向旧程序，需要一并调整。先备份实际站点配置，按 [全流程第 7 节：复用现成 HTTPS](部署实测与日常操作全流程.md#7-配置-https-后台入口) 检查并重载，再验证：
 
-正式入口为 `https://notify.1231.com`，应使用 HTTPS 登录后台。细节见 [子域名启动说明](子域名启动说明.md)。Nginx 完整配置模板位于 `../deploy/nginx.conf.example`，其中证书路径必须对应已经存在的证书文件。
+```bash
+curl --fail --show-error https://notification.hongquanquan.cn/health
+```
+
+应返回新工具的 `status: ok`、`version: 1.0.0`。浏览器打开域名应看到新工具登录页，页面、静态资源和登录均正常。首次使用其他未配置域名时，再按 [子域名启动说明](子域名启动说明.md) 设置 DNS 和证书。
 
 ## 3. 启动 Windows 发送端
 
