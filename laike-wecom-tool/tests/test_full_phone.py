@@ -157,6 +157,34 @@ def test_later_conflicting_clue_blocks_a_previously_ready_order_at_claim(engine,
     assert "13800000000" not in row["body"] and "13900000000" not in row["body"]
 
 
+def test_claim_preserves_manual_lead_text_when_only_phone_metadata_refreshes(engine, db):
+    require_phone(db)
+    result = engine.ingest_event(normalize_clue(clue(), "1001"))
+    message = engine.message_detail(result["message_id"])
+    edited = "【真实历史留资联调】\n此消息用于测试，无需业务处理。\n" + message["body"]
+    engine.manual_action(message["id"], "edit", {"version": message["version"], "body": edited})
+    delivery(db)
+
+    job = engine.claim("sender")
+
+    assert job["text"] == edited
+    updated = engine.message_detail(message["id"])
+    assert updated["body"] == edited and updated["payload"]["phone_available"] is True
+
+
+def test_claim_still_updates_phone_when_authoritative_lead_number_changes(engine, db):
+    require_phone(db)
+    result = engine.ingest_event(normalize_clue(clue(), "1001"))
+    engine.ingest_event(normalize_clue(clue(phone="13900000000"), "1001"))
+    delivery(db)
+
+    job = engine.claim("sender")
+
+    assert job["id"] == result["message_id"]
+    assert "13900000000" in job["text"] and "13800000000" not in job["text"]
+    assert engine.message_detail(job["id"])["payload"]["phone"] == "13900000000"
+
+
 @pytest.mark.parametrize("change,expected", [
     ("age", "skipped_old"), ("store", "blocked"), ("template", "muted"), ("group", "unrouted")])
 @pytest.mark.parametrize("automatic", [True, False])

@@ -310,10 +310,12 @@ class Engine:
                 if not m["is_test"] and (payload.get("phone_source") == "douyin_clue" or not full_phone(payload.get("phone"))):
                     refreshed = self._attach_phone(c, m["enterprise_id"], payload, m["category"])
                     if refreshed != payload:
-                        template = dict(c.execute("SELECT * FROM templates WHERE kind=?", (m["category"],)).fetchone())
-                        enterprise = c.execute("SELECT name FROM enterprises WHERE id=?", (m["enterprise_id"],)).fetchone()
-                        store = c.execute("SELECT name FROM stores WHERE id=?", (m["store_id"],)).fetchone()
-                        m["body"] = render(template, refreshed, enterprise["name"], store["name"] if store else "")
+                        # 只刷新号码状态等元数据时，保留管理员编辑过的正文。
+                        if any(refreshed.get(key) != payload.get(key) for key in ("phone", "customer")):
+                            template = dict(c.execute("SELECT * FROM templates WHERE kind=?", (m["category"],)).fetchone())
+                            enterprise = c.execute("SELECT name FROM enterprises WHERE id=?", (m["enterprise_id"],)).fetchone()
+                            store = c.execute("SELECT name FROM stores WHERE id=?", (m["store_id"],)).fetchone()
+                            m["body"] = render(template, refreshed, enterprise["name"], store["name"] if store else "")
                         c.execute("UPDATE events SET payload=? WHERE id=?", (dumps(refreshed), m["event_id"]))
                         c.execute("UPDATE messages SET body=?,updated_at=?,version=version+1 WHERE id=?", (m["body"], now, m["id"]))
                     payload = refreshed
