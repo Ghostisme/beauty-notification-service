@@ -11,6 +11,7 @@ import requests
 
 from .desktop import BeforeSendError, UncertainSendError, create_desktop
 from .identity import sender_identity
+from .network import create_session, request_json
 
 
 class Ledger:
@@ -69,11 +70,13 @@ class Worker:
             self.logger.addHandler(handler);self.logger.addHandler(logging.StreamHandler())
 
     def request(self,path,body=None):
-        headers={"Authorization":"Bearer "+self.token}
-        if not getattr(self.network,"session",None):self.network.session=requests.Session()
-        if body is None:r=self.network.session.get(self.base+path,headers=headers,timeout=(5,15))
-        else:r=self.network.session.post(self.base+path,headers=headers,json=body,timeout=(5,15))
-        r.raise_for_status();return r.json()
+        if not getattr(self.network,"session",None):self.network.session=create_session(self.config)
+        return request_json(self.config,path,body,self.network.session)
+
+    def close_network(self):
+        session=getattr(self.network,"session",None)
+        if session is not None:
+            session.close();self.network.session=None
 
     def heartbeat(self):
         with self.groups_lock:
@@ -93,10 +96,12 @@ class Worker:
         return ready
 
     def heartbeat_loop(self):
-        while not self.stop.is_set():
-            try:self.heartbeat()
-            except Exception as e:self.logger.warning("心跳暂时失败：%s",type(e).__name__)
-            self.stop.wait(15)
+        try:
+            while not self.stop.is_set():
+                try:self.heartbeat()
+                except Exception as e:self.logger.warning("心跳暂时失败：%s",type(e).__name__)
+                self.stop.wait(15)
+        finally:self.close_network()
 
     def flush_receipts(self):
         for row in self.ledger.pending():
@@ -156,4 +161,4 @@ class Worker:
                 if once:break
                 self.stop.wait(min(15,max(2,int(self.config.get("poll_seconds",3)))*(1+idle)))
         finally:
-            self.stop.set();thread.join(timeout=20)
+            self.stop.set();thread.join(timeout=20);self.close_network()

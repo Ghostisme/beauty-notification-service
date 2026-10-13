@@ -1,7 +1,9 @@
-# Windows / Python 3.12 sender environment verified on 2026-10-12.
+# Windows / Python 3.12 sender environment verified on 2026-10-13.
 certifi==2026.7.22
+cffi==2.1.1 ; platform_system == "Windows"
 charset-normalizer==3.5.2
 colorama==0.4.6
+curl-cffi==0.16.3 ; platform_system == "Windows"
 flatbuffers==25.12.19
 idna==3.20
 numpy==2.5.4
@@ -11,6 +13,7 @@ packaging==26.3
 pillow==12.3.0
 protobuf==7.36.2
 pyclipper==1.4.0
+pycparser==3.11 ; platform_system == "Windows"
 pywin32==312 ; platform_system == "Windows"
 PyYAML==6.0.3
 rapidocr-onnxruntime==1.4.4

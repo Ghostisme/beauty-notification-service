@@ -35,6 +35,17 @@
 
 如多台发送电脑分别负责不同门店，给每台设置唯一 `worker_id`，再添加 `group_ids` 数组，仅填写这台电脑负责的逻辑群 ID。不要让多个自动化实例共同操作一个 Windows 桌面。
 
+Windows 发送端连接 HTTPS 时默认使用兼容 Chrome 的连接方式，保留域名及可信 CA 的证书校验。它用于处理浏览器可以访问、普通 Python HTTPS 连接却被中断的网络环境；依赖仅安装在发送电脑上。HTTP 本机连接和 Mac 默认使用原来的连接方式。可在 `sender-config.json` 中明确设置 `"http_transport": "browser"` 或 `"http_transport": "requests"`。
+
+更新已有 Windows 发送端后，先停止运行中的发送端，再执行：
+
+```powershell
+.\.sender-venv\Scripts\python.exe -m pip install -r requirements-sender.lock
+.\.sender-venv\Scripts\python.exe -X utf8 sender.py --check --test-only
+```
+
+`server_connected: true` 表示令牌、绑定群读取与心跳上报成功；`ready: true` 表示桌面和负责群也已就绪。这个检查不领取任务或发送消息。更新时保留 `sender-config.json` 和 `sender-data`；后者含窗口校准与防重复发送账本。
+
 ## 界面校准
 
 运行 `sender.py --calibrate` 后，校准工具会显示当前企微主窗口截图。依次点击或框选：

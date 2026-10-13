@@ -35,11 +35,8 @@ def save_config(path, config):
 
 
 def configure_groups(path, config):
-    import requests
-    response = requests.get(config["server"].rstrip("/") + "/api/relay/groups",
-                            headers={"Authorization":"Bearer " + config["token"]}, timeout=(5,15))
-    response.raise_for_status()
-    groups = response.json()["items"]
+    from sender.network import request_json
+    groups = request_json(config, "/api/relay/groups")["items"]
     if not groups:
         raise ValueError("后台没有启用的群绑定，请先在企业与门店中添加")
     print("选择这台电脑负责的群。只列出后台已绑定的群；发送账号还须在企微中加入这些群。")
@@ -103,6 +100,7 @@ def main():
         except Exception as exc:
             print(json.dumps({"server_connected":False,"ready":False,
                               "detail":error_text(exc,(worker.token,))},ensure_ascii=False))
+        finally:worker.close_network()
         return
     from run import process_lock
     try:lock=process_lock(worker.data.resolve())
