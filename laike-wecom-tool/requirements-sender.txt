@@ -1,4 +1,8 @@
 requests>=2.32,<3
 Pillow>=10
-rapidocr-onnxruntime>=1.4,<2
+rapidocr-onnxruntime>=1.4,<2; sys_platform == 'win32'
 pywin32>=306; sys_platform == 'win32'
+pyobjc-framework-Cocoa>=12.2.2,<13; sys_platform == 'darwin'
+pyobjc-framework-Quartz>=12.2.2,<13; sys_platform == 'darwin'
+pyobjc-framework-Vision>=12.2.2,<13; sys_platform == 'darwin'
+pyobjc-framework-ApplicationServices>=12.2.2,<13; sys_platform == 'darwin'

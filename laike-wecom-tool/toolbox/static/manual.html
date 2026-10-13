@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>来客门店通知工具 · 操作手册</title><link rel="stylesheet" href="manual.css"></head>
+<body><header class="masthead"><div class="brand">来客门店通知工具</div><span>Windows / Apple 芯片 Mac</span></header>
+<div class="layout"><aside class="contents"><p class="nav-title">按需要找步骤</p><div class="toc">
+<ul>
+<li><a href="#section-f83dc787">先认识这套工具</a></li>
+<li><a href="#section-01">01 · 先把服务器后台部署好</a></li>
+<li><a href="#section-02">02 · 登录后台，确认店和群</a></li>
+<li><a href="#section-03">03 · Apple 芯片 Mac 第一次安装</a></li>
+<li><a href="#section-04">04 · Windows 第一次安装</a></li>
+<li><a href="#section-05">05 · 配好完整手机号和三类通知</a></li>
+<li><a href="#section-06">06 · 用测试群实测：从一笔新订单开始</a></li>
+<li><a href="#section-07">07 · 测试通过后接正式门店</a></li>
+<li><a href="#section-08">08 · 每天怎么操作，以及何时手动介入</a></li>
+<li><a href="#section-09">09 · 常见问题，一眼找处理位置</a></li>
+<li><a href="#section-10">10 · 备份、更新和服务器资源检查</a></li>
+<li><a href="#section-11">11 · 首次验收清单</a></li>
+<li><a href="#section-5fa8caa5">查阅资料</a></li>
+</ul>
+</div>
+
+<p class="nav-note">首次安装按顺序执行。日常运营主要看 08、09；服务器维护看 01、10。</p>
+<a class="back" href="https://notification.hongquanquan.cn">打开线上后台 ↗</a></aside>
+<main><section class="hero"><p class="eyebrow">安装 · 实测 · 日常操作</p><h1>来客通知，按步骤用起来。</h1>
+<p>从真实抖音数据，到对应门店的企微外部客户群。<br>一份手册，完成部署、Mac 登录、测试和人工处理。</p>
+<div class="quick-links"><a href="#section-03">我先安装 Mac →</a><a href="#section-08">我查看日常操作 →</a><a href="#section-01">我来部署服务器 →</a></div></section>
+<article><p>适用：阿里云 1 核 / 2 GiB / 5 Mbps；Windows 或 Apple 芯片 Mac；已有企微外部客户群。</p>
+<p>后台地址：<strong>https://notification.hongquanquan.cn</strong>。本机联调地址：<strong>http://127.0.0.1:8790</strong>。</p>
+<p>程序分支：<code>feature/laike-wecom-tool</code>。本手册随程序提供，不需要打开聊天记录找步骤。</p>
+<p><strong>当前进度说明（2026-10-13）</strong>：本机已完成真实订单、客资线索与部分完整手机号查询；此前经确认向测试群发送过一条历史订单。Mac 发送端代码、安装入口已加入，仍需在你的 Mac 上完成系统授权、校准及一条真实消息验收。阿里云及这个域名的新版本切换尚未执行。手册中的“看到什么才算完成”用于你实际操作时核对。</p>
+<h2 id="section-f83dc787">先认识这套工具</h2>
+<p>可以把它理解为两个部分：服务器是“收件和分单员”，企微电脑是“发消息员”。</p>
+<table>
+<thead>
+<tr>
+<th>放在哪里</th>
+<th>做什么</th>
+<th>平时需要保持什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>阿里云服务器</td>
+<td>查询抖音订单和留资、补全号码、按门店生成通知、保存发送记录</td>
+<td>服务器和后台服务持续运行</td>
+</tr>
+<tr>
+<td>一台 Windows 或 Mac</td>
+<td>登录企业微信，领取消息，找到对应外部客户群并发送</td>
+<td>企微登录、电脑解锁、窗口展开、网络正常</td>
+</tr>
+<tr>
+<td>浏览器</td>
+<td>看进度、改模板、处理失败、补录号码</td>
+<td>查看时打开即可；关闭浏览器不影响服务器任务</td>
+</tr>
+</tbody>
+</table>
+<p>实际过程：<strong>客户下单或留资 → 服务器读取 → 找到对应门店和群 → 企微电脑发送 → 后台记录结果</strong>。</p>
+<p>消息由已加入外部群的企微账号发出。选择“企微内部应用”不会把现有外部客户群变成可直接调用的内部群。当前要按单自动发到外部客户群，仍需登录企微的 Windows 或 Mac 电脑。</p>
+<p>建议第一次只接测试店和“壹心-湖南-测试消息店”，跑通后逐家增加正式门店。</p>
+<h2 id="section-01">01 · 先把服务器后台部署好</h2>
+<p>这一部分通常由维护服务器的人操作一次。只安装 Mac 发送端时，先确认维护人员已经把新的后台放到上述域名；Mac 的 <code>127.0.0.1</code> 指 Mac 自己，不能用它连接另一台 Windows 的本机后台。</p>
+<h3 id="section-9a8c7259">第 1 步：查看旧服务和服务器系统</h3>
+<p>在阿里云控制台连接服务器终端，用以前启动旧通知程序的账号查看 PM2：</p>
+<pre><code class="language-bash">pm2 list
+cat /etc/os-release
+free -h
+df -h /
+docker --version
+docker compose version
+</code></pre>
+<p>记下旧通知程序在 PM2 中的准确名称、项目目录，以及旧留资回调地址。旧 MySQL 中的留资和日志仍保留；新工具使用自己目录下的 SQLite 数据库，不会自动把旧 MySQL 数据导入。</p>
+<p><strong>看到什么才算完成：</strong>确认操作的是目标服务器，知道旧程序名称，磁盘可用。1 核 / 2 GiB 可作为这套轻量后台的起步配置，应用容器限制为 384 MiB / 0.8 核；它不是整台机器的总占用，也不是该服务器的实测容量。旧 Node、MySQL 和其他程序的占用需要一起查看。</p>
+<h3 id="section-c6722849">第 2 步：准备 Docker 和下载新分支</h3>
+<p>已经有可用的 Docker 和 Compose 时，直接下载代码。没有时，按 <a href="https://github.com/Ghostisme/beauty-notification-service/blob/feature/laike-wecom-tool/laike-wecom-tool/docs/%E9%83%A8%E7%BD%B2%E5%AE%9E%E6%B5%8B%E4%B8%8E%E6%97%A5%E5%B8%B8%E6%93%8D%E4%BD%9C%E5%85%A8%E6%B5%81%E7%A8%8B.md">部署、实测与日常操作全流程</a> 第 3 节安装；其中安装块只适用于 Ubuntu 24.04 / x86_64。其他系统按实际系统安装，不要照抄 Ubuntu 命令。</p>
+<p>新程序用独立目录 <code>/opt/laike-notify</code>，避免覆盖旧 Node 项目。该目录已存在时，先确认它就是这套工具的部署目录，再更新。</p>
+<pre><code class="language-bash">cd /opt
+git clone --branch feature/laike-wecom-tool --single-branch https://github.com/Ghostisme/beauty-notification-service.git laike-notify
+cd /opt/laike-notify/laike-wecom-tool
+docker compose config --quiet
+</code></pre>
+<p><strong>看到什么才算完成：</strong>代码下载成功，最后的配置检查没有报错。暂时不要开自动发送。</p>
+<h3 id="section-a6facadb">第 3 步：把已有本机配置迁过去</h3>
+<p>推荐沿用已经真实验证的本机后台数据。</p>
+<ol>
+<li>在 Windows 本机后台打开“自动任务”，关闭自动同步和自动发送，分别保存。</li>
+<li>等正在同步的任务结束；“发送中”和“等待回执”需要先核实结果。</li>
+<li>停止本项目的企微发送端，保留原 <code>sender-data</code> 发送账本；记下原管理员密码。</li>
+<li>在 Windows 的 <code>laike-wecom-tool</code> 目录运行下面的备份命令。</li>
+</ol>
+<pre><code class="language-powershell">.\.venv\Scripts\python.exe -X utf8 manage.py backup
+</code></pre>
+<p>把 <code>data/backups</code> 中刚生成的 <code>laike-日期.zip</code> 上传到服务器的 <code>/root/laike-migrate.zip</code>。可用阿里云 Workbench 文件上传；用其他服务器账号时，换成该账号能写入的目录。</p>
+<p>在服务器执行：下面要求新目录 <code>data</code> 中没有另一套数据库。不要覆盖正在运行的另一套数据。</p>
+<pre><code class="language-bash">cd /opt/laike-notify/laike-wecom-tool
+unzip -l /root/laike-migrate.zip
+install -d -m 700 data
+unzip -q /root/laike-migrate.zip -d data
+chown 10001:10001 data data/tool.db data/.master-key
+chmod 600 data/tool.db data/.master-key
+docker compose up -d --build
+docker compose ps
+curl --fail http://127.0.0.1:8790/health
+docker compose exec -T tool python manage.py check
+</code></pre>
+<p>若服务器没有 <code>unzip</code>，先用对应系统的软件管理器安装。备份包同时包含数据库和加密密钥，二者必须来自同一份备份。</p>
+<p><strong>看到什么才算完成：</strong>健康检查返回 <code>status: ok</code>，数据库检查通过；管理员密码仍是原密码。迁移后本机后台保持关闭自动任务，由云端接管。首次构建下载镜像的资源占用不受应用容器的运行限额约束。</p>
+<p>没有迁移包也可全新初始化，但需要重新配置商家、门店、密钥和令牌。新库首次密码在服务器 <code>data/.bootstrap-password</code>；不要把它当作迁移后旧库的新密码。</p>
+<h3 id="section-2284ddea">第 4 步：把现有域名转到新工具</h3>
+<p>你已处理好 DNS 和 HTTPS，继续沿用现有证书。由维护人员在这个域名的现有 Nginx HTTPS 配置中，将应用转发目标改为 <code>127.0.0.1:8790</code>。先把原站点文件备份到 Nginx 不加载的目录。</p>
+<pre><code class="language-nginx">location / {
+    client_max_body_size 2m;
+    proxy_pass http://127.0.0.1:8790;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 35s;
+}
+</code></pre>
+<p>这是替换原应用转发的位置配置，不能在同一个站点盲目再加一个相同的 <code>location /</code>。旧 <code>/api/</code>、静态资源规则如果仍指向 Node，需要相应调整。原 HTTPS 证书、续期、HTTP 跳转保留；仍用于接收真实留资的旧回调先保留，确认新工具能接收后再切。</p>
+<p>系统 Nginx 用下面的命令检查并重载；面板或容器管理的 Nginx 使用它自己的检查和重载方式。</p>
+<pre><code class="language-bash">nginx -t &amp;&amp; systemctl reload nginx
+curl --fail https://notification.hongquanquan.cn/health
+</code></pre>
+<p><strong>看到什么才算完成：</strong>域名健康检查返回新工具的 <code>status: ok</code>，浏览器显示“来客门店通知”登录页，原账号密码可登录，原门店及记录都在。应用端口 8790 只在服务器本机监听，不必开放到公网。</p>
+<p>确认新后台、旧回调及自动任务已经切换后，才停掉确认属于旧通知程序的 PM2 项目，避免两套程序重复发消息。不要停止其他 PM2 项目或 MySQL。需要回退时，先关闭新后台同步与发送，停止发送端，恢复原域名站点配置并检查重载，再核对旧服务。</p>
+<h3 id="section-37b0ff32">第 5 步：验证服务器能真实查询抖音</h3>
+<ol>
+<li>登录域名后台，打开“接入设置”。</li>
+<li>核对已保存的应用凭证。Secret 留空保存表示保留原密钥，不用重复填写。</li>
+<li>在“真实接入检查”点击验证抖音，检查应用及这个商户是否成功。</li>
+<li>如果出现 <code>2119013</code>，把<strong>阿里云服务器请求抖音时的真实公网出口 IP</strong>加入该应用白名单；本机 Windows 以前加入的出口 IP 不等于服务器 IP。使用代理时需核对实际出站线路。</li>
+<li>保持自动发送关闭，点击“立即同步”，在“自动任务”查看结果。</li>
+</ol>
+<p><strong>看到什么才算完成：</strong>应用验证及商家真实查询成功；任务正常完成。没有新数据时 0 条也可能正常，下一步仍要用一笔新订单验证整个链路。</p>
+<h2 id="section-02">02 · 登录后台，确认店和群</h2>
+<ol>
+<li>用浏览器打开 <strong>https://notification.hongquanquan.cn</strong>。</li>
+<li>账号填 <code>admin</code>，密码填部署时保留的管理员密码。</li>
+<li>打开“企业与门店”，确认每家企业和门店的对应关系。</li>
+</ol>
+<p>目前测试信息：</p>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>当前测试值</th>
+<th>填写位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>商户根账户 ID</td>
+<td><code>7274898741256980495</code></td>
+<td>企业的“抖音商户账号 ID”</td>
+</tr>
+<tr>
+<td>门店 ID</td>
+<td><code>7275157740467521555</code></td>
+<td>门店的“抖音门店 ID”</td>
+</tr>
+<tr>
+<td>接收群名称</td>
+<td><code>壹心-湖南-测试消息店</code></td>
+<td>门店的“企微外部客户群名称”</td>
+</tr>
+</tbody>
+</table>
+<p>门店名称填业务上实际使用的名称；接收群名称必须与企微中的完整群名一致。Windows 和 Mac 桌面模式的“接收群 ID”保留工具自动生成的值即可，不用向腾讯申请 <code>chat_id</code>。</p>
+<p>发送账号必须在企微中加入这个外部客户群，并能手动发消息。加入正式门店时，对每家企业单独确认授权，再添加它自己的门店 ID 和唯一完整群名。不能只靠群名字中的城市文字匹配订单。</p>
+<p><strong>看到什么才算完成：</strong>后台店与群绑定正确，发送账号在企微能找到该群。重复群名会影响唯一识别，需要先改成能唯一定位的完整名称。</p>
+<h2 id="section-03">03 · Apple 芯片 Mac 第一次安装</h2>
+<p>建议 macOS 13 或更新版本，使用正常登录的桌面。Mac 上只安装发送端，后台仍运行在服务器。</p>
+<h3 id="section-7e78a5b0">第 1 步：安装企微并登录正确账号</h3>
+<p>从 <a href="https://work.weixin.qq.com/">企业微信官网</a> 下载 Mac 客户端，按客户端提示完成扫码或其他登录验证，选择负责门店客户群的企业身份。搜索并打开“壹心-湖南-测试消息店”，确认群内有外部联系人且自己能正常发消息。</p>
+<p>将窗口展开到合适大小，关闭额外的独立聊天窗口和弹窗。第一次校准后保持窗口尺寸和显示设置一致。发送时不要同时在这台电脑处理其他聊天或使用鼠标键盘；建议使用专门的企微电脑。</p>
+<h3 id="section-d5bbaaa4">第 2 步：安装 Python 并获取正确分支</h3>
+<p>从 <a href="https://www.python.org/downloads/macos/">Python 官网 Mac 下载页</a> 选择 <strong>Python 3.12 的 macOS 64-bit universal2 installer</strong>，安装器自带所需的图形界面组件。Apple 芯片使用原生 ARM64，不用 Rosetta。已有 Homebrew Python 时也可用 3.12，但还要确认 Tk 图形组件完整；本手册推荐官方安装器。</p>
+<p>如果源码通过 Git 下载，在终端执行下面三行；程序会出现在个人目录的 <code>laike-notify</code> 文件夹。</p>
+<pre><code class="language-bash">cd ~
+git clone --branch feature/laike-wecom-tool --single-branch https://github.com/Ghostisme/beauty-notification-service.git laike-notify
+cd ~/laike-notify/laike-wecom-tool
+</code></pre>
+<p>第一次运行 Git 时，Mac 可能提示安装命令行工具，按系统提示安装后重试。也可在 GitHub 切到 <code>feature/laike-wecom-tool</code> 分支，点 Code → Download ZIP，解压后进入其中的 <code>laike-wecom-tool</code> 文件夹。不要下载默认分支而漏掉这套工具。</p>
+<p>第一次让双击入口可执行：在终端输入 <code>cd</code>，将 Finder 中的 <code>laike-wecom-tool</code> 文件夹拖入终端，回车，然后执行：</p>
+<pre><code class="language-bash">chmod +x *.command
+</code></pre>
+<p>以后可直接在 Finder 双击入口。如果系统提示不能打开，核对来源后按 macOS 的“右键 → 打开”或“隐私与安全 → 仍要打开”完成首次允许。保持系统保护功能开启。</p>
+<h3 id="section-84310782">第 3 步：双击测试入口并填写两个值</h3>
+<p>双击 <strong><code>start-test-sender.command</code></strong>。第一次会自动安装依赖，完成后提示填写：</p>
+<table>
+<thead>
+<tr>
+<th>询问的内容</th>
+<th>怎么填写</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>服务器地址</td>
+<td><code>https://notification.hongquanquan.cn</code>，末尾不用加 <code>/send</code></td>
+</tr>
+<tr>
+<td>发送端接入令牌</td>
+<td>后台“接入设置 → Windows / Mac 发送端连接 → 查看发送端接入令牌”复制的令牌</td>
+</tr>
+</tbody>
+</table>
+<p>令牌是<strong>本工具生成的</strong>，不是抖音 Client Secret，也不是企微企业 ID。粘贴令牌时终端不会显示字符，粘贴后按回车即可。HTTP 发送地址在桌面模式留空，不用寻找企微的 HTTP 发群地址。</p>
+<p>连接配置保存到本机 <code>sender-config.json</code>，Mac 与 Windows 各用自己的配置和身份。首次范围仅含测试群。</p>
+<h3 id="section-c7bac401">第 4 步：开启两项系统权限</h3>
+<p>发送端会检查并提示缺少的权限。到苹果菜单 → 系统设置 → 隐私与安全，依次处理：</p>
+<table>
+<thead>
+<tr>
+<th>权限</th>
+<th>为什么需要</th>
+<th>怎么操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>辅助功能</td>
+<td>点击搜索框、切换群、输入和发送</td>
+<td>允许此次启动程序所用的“终端”；系统列出 Python 时也核对并允许对应 Python</td>
+</tr>
+<tr>
+<td>屏幕录制／录屏与系统录音</td>
+<td>读取群标题和消息文字，核对目标与结果</td>
+<td>允许同一启动程序对应的终端／Python；无需录制麦克风音频</td>
+</tr>
+</tbody>
+</table>
+<p>列表没有终端时，辅助功能可点“＋”添加 <code>/System/Applications/Utilities/Terminal.app</code>。不同 macOS 版本对终端和 Python 的显示名称可能不同，以系统弹窗标识和发送端检查结果为准。</p>
+<p>授权完成后按提示退出并重新打开终端，再双击测试入口。若曾勾选终端“使用 Rosetta 打开”，取消后重新打开。看到“Mac 系统权限已就绪”才继续。</p>
+<p>权限说明依据：<a href="https://support.apple.com/zh-cn/guide/mac-help/mh43185/mac">Apple 辅助功能授权</a>、<a href="https://support.apple.com/zh-cn/guide/mac-help/mchld6aa7d23/mac">Apple 录屏授权</a>。</p>
+<h3 id="section-13915c4b">第 5 步：按五步校准企微界面</h3>
+<p>“校准”就是告诉工具搜索框、群标题和消息框分别在哪里。工具会显示企微窗口截图，跟着提示点击或框选。</p>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>要选择什么</th>
+<th>要避免什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>点左上角全局搜索输入框</td>
+<td>不要点联系人列表</td>
+</tr>
+<tr>
+<td>2</td>
+<td>框选搜索结果中完整群名和人数所在的位置</td>
+<td>排除“外部”标签、时间、搜索输入框</td>
+</tr>
+<tr>
+<td>3</td>
+<td>框选聊天顶部的完整群标题和人数</td>
+<td>不要包含聊天正文</td>
+</tr>
+<tr>
+<td>4</td>
+<td>点消息输入框的中间</td>
+<td>不要点聊天历史消息</td>
+</tr>
+<tr>
+<td>5</td>
+<td>框选聊天消息显示区</td>
+<td>排除顶部群标题和下面的输入框</td>
+</tr>
+</tbody>
+</table>
+<p>第 2 步看不到搜索结果时，点“刷新截图（5 秒后）”，在 5 秒内到企微搜索测试群，等新截图出来再框选。第 3 步需要关闭搜索弹层、打开目标群时，也可刷新。选错可点“上一步”；关闭校准窗口会取消，不会启动发送。</p>
+<p>最后按企微自己的设置选择发送快捷键：Enter、Command（⌘）+Enter，或 Ctrl+Enter。这里不能凭感觉选错，否则可能只换行、不发送。Mac 的全选和粘贴由程序自动使用 Command，不需要你配置。</p>
+<p><strong>看到什么才算完成：</strong>保存校准后发送端开始运行；后台显示该 Mac 已连接，并在没有键鼠操作约 3 秒后显示桌面已就绪。窗口尺寸变化、显示设置变化或换电脑后重新校准；Windows 的校准文件不能复制给 Mac 使用。</p>
+<h2 id="section-04">04 · Windows 第一次安装</h2>
+<ol>
+<li>安装 Python 3.12 和企业微信，登录能访问门店外部客户群的账号。</li>
+<li>获取同一个 <code>feature/laike-wecom-tool</code> 分支，进入 <code>laike-wecom-tool</code>。</li>
+<li>双击 <code>start-test-sender.bat</code>，填后台域名和后台的发送端接入令牌。</li>
+<li>按上一节相同的五步校准；Windows 一般选择企微实际使用的 Enter 或 Ctrl+Enter。</li>
+<li>保持发送端窗口运行，桌面解锁，企微展开，查看后台发送端状态。</li>
+</ol>
+<p>Windows 不需要 Mac 的屏幕录制和辅助功能授权。两种系统都使用相同后台、模板、外部客户群与发送结果记录。</p>
+<p>重新校准 Windows 时，在本项目目录执行：</p>
+<pre><code class="language-powershell">.\.sender-venv\Scripts\python.exe -X utf8 sender.py --calibrate
+</code></pre>
+<h2 id="section-05">05 · 配好完整手机号和三类通知</h2>
+<h3 id="section-0f8fe80b">完整手机号</h3>
+<p>在“接入设置”核对：</p>
+<ol>
+<li>勾选“同步抖音客资中心线索并补全订单手机号”。</li>
+<li>勾选“启用平台手机号批量解密能力”。</li>
+<li>首次线索回看填 <code>180</code> 天，保存抖音设置。</li>
+</ol>
+<p>在“自动任务 → 通知发送规则”勾选“必须取得完整手机号后才能发送”，保存。</p>
+<p>本机已对当前测试商户验证过真实线索和在线解密：35 条线索中 26 条取得完整号码，9 条仍带掩码。这个结果不代表以后每单都能解出，也不代表其他商户自动具备相同权限。完整号码可能受平台授权、解密额度、线索存在与到达时间影响。</p>
+<p>只有 <code>138****1234</code> 一类打码文字时，工具无法把星号恢复成原号码；消息会等待线索补全，或由门店提供已核对的完整号码后手动补录。线索通常比订单晚约 10 分钟落入，服务器另有同步间隔，因此手机号通知可能晚于客户付款。11 位格式本身也不保证是客户永久自有号码。</p>
+<p>核对之前截图中的订单时，在“通知记录”的搜索框输入 <code>1094788591292824492</code>。关联留资详情也会显示“关联订单”。历史样本用于查看数据；不会因打开详情自动发到群里。</p>
+<h3 id="section-8ff6e7f8">三类模板</h3>
+<p>“通知模板”分别有“新订单通知”“新留资通知”“状态变化通知”。打开需要的模板，保存。默认使用花括号变量，操作时可点页面的变量按钮插入，不要改成尖括号或删除业务编号。</p>
+<pre><code class="language-text">【抖音来客｜新订单通知】
+门店：{门店名称}
+客户：{客户称呼}
+联系电话：{客户手机号}
+团购项目：{团购卡／套餐名称}
+购买数量：{数量}
+实付金额：{金额}
+订单状态：{状态}
+下单时间：{下单时间}
+订单编号：{订单编号}
+</code></pre>
+<p>金额变量已按后台金额单位处理；预览时核对实际金额。新留资模板保留“留资编号”和“留资时间”，状态模板保留“订单编号”“状态变化”和“变化时间”。发送端靠这些字段确认这次事件，不能删除。</p>
+<p>“自动任务 → 通知发送规则”建议新订单选择“支付成功后通知”；状态变化只勾业务需要的核销、退款等事件。模板启用和具体状态事件勾选都需要保存。支付成功触发新订单时，同一次支付不会再发一条重复的支付状态通知。</p>
+<p><strong>看到什么才算完成：</strong>三类模板分别保存、预览内容正确；完整号码要求已经启用；真实新消息缺少号码时状态为“待补全手机号”，没有被当作已发出。</p>
+<h2 id="section-06">06 · 用测试群实测：从一笔新订单开始</h2>
+<p>这一节会实际往测试群发消息，请由操作人按顺序执行。Mac 尚需用这一步完成真实验收。</p>
+<h3 id="section-033014d8">测试前先看三件事</h3>
+<ol>
+<li>“自动任务”关闭自动发送并保存；先保持同步可控。</li>
+<li>发送电脑使用测试专用入口，范围仅有“壹心-湖南-测试消息店”。</li>
+<li>查看“待发送”队列。开启自动发送会处理所有满足条件的待发任务，不只处理当前打开的这一条；测试时先核对队列内容和负责群范围。</li>
+</ol>
+<h3 id="section-00cb2569">真实新订单：完整走一遍</h3>
+<ol>
+<li>在后台点“立即同步”，等这一轮完成，建立测试前基线。</li>
+<li>在已授权的测试店按实际业务完成一笔新的支付，记下订单编号、付款时间、套餐和金额。</li>
+<li>再点一次“立即同步”。如果暂未返回，等待后续同步，并查看任务错误。</li>
+<li>在“通知记录”按新订单编号搜索，打开详情，核对门店、目标群、商品、金额、时间和状态。</li>
+<li>如果显示“待补全手机号”，继续等待线索到达并同步；需要人工补录时按第 08 节处理。保持完整号码门槛，不用取消它来伪造验收通过。</li>
+<li>号码和正文正确、待发队列已核对、发送端已就绪后，在“自动任务”开启自动发送并保存。</li>
+<li>暂停发送电脑的鼠标键盘操作，让程序搜索群并发送。Mac 保持终端窗口运行。</li>
+<li>在企微测试群找到同一订单编号，核对全文；后台应出现“已发送”和此次发送尝试。</li>
+<li>关闭自动发送，重复同步两轮，确认该次支付没有再生成重复通知、群里没有重复消息。</li>
+</ol>
+<p><strong>看到什么才算完成：</strong>一笔真实新支付生成一条对应通知，完整可用号码有实际来源，准确进入测试外部群，后台记录发送结果，重复同步不重复发。</p>
+<p>“已发送”表示发送端在目标群窗口识别到了消息的编号和事件信息，或由人核实确认；当前没有腾讯服务端逐条送达回执。确认失败时会进入“待人工核实”，按第 08 节处理。</p>
+<h3 id="section-3e7d91e3">自动任务：让下一单自动处理</h3>
+<ol>
+<li>“自动任务”开启自动同步，间隔设 <code>2</code> 分钟并保存。</li>
+<li>测试范围和队列确认后开启自动发送。</li>
+<li>再完成一笔新的真实支付，这次不点“立即同步”。</li>
+<li>看服务器下一轮任务、通知生成、号码补全及群内消息，记录各自时间。</li>
+</ol>
+<p>通过后再按实际业务测试一次新留资、一次拟启用的状态变化。状态变化必须先有变化前快照，再核销或退款；“订单已完成”不一定等于券已核销。历史订单和历史线索只作为历史记录，不会自动全量补发。</p>
+<p>若仅想先测客户端发送能力，可在“运行概览 → 测试消息”创建带“模拟数据”标记的通知。它不能证明抖音真实查询和手机号链路已通过。当前真实门店已绑定测试群时，不要用模拟测试群配置覆盖真实门店；直接走上面的真实订单测试。</p>
+<h2 id="section-07">07 · 测试通过后接正式门店</h2>
+<ol>
+<li>每家合作企业先在抖音完成对应用的授权。</li>
+<li>“企业与门店”添加该企业，再添加它的门店 ID、名称和唯一完整外部群名。</li>
+<li>在企微手动确认发送账号已加入各门店外部群，并能发消息。</li>
+<li>暂停自动发送，关闭发送端窗口。</li>
+<li>Mac 双击 <code>select-sender-groups.command</code>；Windows 双击 <code>select-sender-groups.bat</code>。</li>
+<li>程序列出后台已绑定的群。输入这台电脑负责的序号，例如 <code>1,3</code>，保存。</li>
+<li>Mac 双击 <strong><code>start-sender.command</code></strong>；Windows 双击 <strong><code>start-sender.bat</code></strong>。正式入口按保存的负责群范围运行。</li>
+<li>在后台核对队列、门店群绑定和发送端状态，再恢复自动发送。</li>
+</ol>
+<p>测试入口永远只领“壹心-湖南-测试消息店”的任务，即使已选其他群，也要换成正式入口才会发正式门店。以后新增群，再执行选择负责群的步骤即可，不需要重装。</p>
+<p>每个桌面只运行一个发送端。换电脑或换操作系统前，先暂停发送、等当前任务结束、核实不明结果、停止旧端，再启新端。各电脑使用自己首次配置产生的身份；不要把整个 Windows 校准和发送配置直接覆盖到 Mac。新 Mac 有自己的本机账本，不能凭新账本为空判断旧任务没发过，必须结合后台记录和群内编号核对。</p>
+<p>至少用两家真实门店分别产生订单，确认各自只进自己的群，才能验收多门店分发；一间测试店不能代替这个检查。</p>
+<h2 id="section-08">08 · 每天怎么操作，以及何时手动介入</h2>
+<h3 id="section-11bd2cc6">每天开机后的四步</h3>
+<ol>
+<li>登录正确的企微企业身份，展开主窗口，确认目标外部群仍在。</li>
+<li>双击发送端入口，保持窗口运行。Mac 入口运行期间会阻止自动休眠，但手动锁屏、合盖、关机仍会让发送停止；需要持续发消息时保持插电、开盖和桌面可操作。</li>
+<li>打开后台“运行概览”，确认发送端已连接、桌面已就绪、最近一次同步成功。</li>
+<li>查看失败、待核实、待分配和待补手机号，按下面表格处理。</li>
+</ol>
+<p>服务器会按计划自动同步，后台浏览器可以关闭。企微电脑关闭或锁定时，服务器继续保存数据，发送等待恢复。</p>
+<h3 id="section-9de4f099">各种状态怎么处理</h3>
+<table>
+<thead>
+<tr>
+<th>后台状态</th>
+<th>是什么意思</th>
+<th>你应该怎么做</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>待发送</td>
+<td>已生成，等待电脑发送</td>
+<td>看自动发送是否开、电脑是否就绪、负责范围是否包含该群</td>
+</tr>
+<tr>
+<td>发送中／等待回执</td>
+<td>电脑正在操作或回报结果</td>
+<td>先等待，不要重复点补发</td>
+</tr>
+<tr>
+<td>已发送</td>
+<td>客户端识别确认或人工核实完成</td>
+<td>打开详情可看确认方式和发送时间</td>
+</tr>
+<tr>
+<td>发送失败</td>
+<td>已确认发送前失败等情况</td>
+<td>看错误，修复群名、窗口或连接；程序按配置重试，必要时再加入队列</td>
+</tr>
+<tr>
+<td>待人工核实</td>
+<td>可能已发出，但未确认</td>
+<td>到对应群搜订单／留资编号；已发则人工确认，确认没发才重新加入队列</td>
+</tr>
+<tr>
+<td>待分配门店</td>
+<td>数据没有匹配到有效门店与群</td>
+<td>通知详情选择本企业的正确门店，分配后核对正文和接收群</td>
+</tr>
+<tr>
+<td>待补全手机号</td>
+<td>缺少可联系的完整号码，或存在冲突</td>
+<td>等线索自动补全；有可靠号码时人工补录；冲突先向门店核实</td>
+</tr>
+<tr>
+<td>历史记录</td>
+<td>初次读到的旧订单或旧线索</td>
+<td>用于查看，不自动发；确需补发时核对目标群后手动重新排队</td>
+</tr>
+<tr>
+<td>已暂停／通知已关闭</td>
+<td>门店或模板等规则未启用</td>
+<td>确认业务是否需要，再调整对应开关</td>
+</tr>
+<tr>
+<td>已取消</td>
+<td>人工取消了该条通知</td>
+<td>无需处理；重新发送前先核对业务必要性</td>
+</tr>
+</tbody>
+</table>
+<h3 id="section-bc88ea31">手工补一个完整手机号</h3>
+<ol>
+<li>“通知记录”按订单编号找到消息，点“查看”。</li>
+<li>展开“补全客户手机号”。</li>
+<li>填可联系客户的完整号码，再填来源说明，例如“门店已核对的预约登记”。</li>
+<li>点“保存手机号并更新通知”，重新核对正文和状态。</li>
+</ol>
+<p>保存号码不会直接单独发一条消息；符合发送规则的消息可以恢复排队。自动发送如果已开启，恢复待发后可能被发送端领取，编辑前需要暂停自动发送时先暂停。</p>
+<h3 id="section-b1467bd3">“待核实”尤其按这个顺序</h3>
+<p>先打开目标群搜业务编号，再决定后台操作。已经看到该次事件的消息，点“人工确认已发送”并填写核对说明；没看到并确认未发送，修复原因后点“重新加入发送队列”。不要用“人工确认”让数字好看，也不要直接批量补发不明结果。</p>
+<h3 id="section-8be425f4">维护电脑或改群名</h3>
+<p>先关闭后台自动发送并保存，等当前发送结束，再停发送端和修改。恢复时重新校准或更新绑定、负责群范围，核对待发队列，再开启自动发送。升级企微后先验证测试群。</p>
+<h2 id="section-09">09 · 常见问题，一眼找处理位置</h2>
+<table>
+<thead>
+<tr>
+<th>现象</th>
+<th>优先处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>域名还是旧 Node 页面</td>
+<td>新后台未切入；让维护人员检查本域名 Nginx 路由及静态资源规则</td>
+</tr>
+<tr>
+<td>域名显示 502</td>
+<td>检查新容器是否运行，转发目标是否 8790；查看新服务日志</td>
+</tr>
+<tr>
+<td>Mac 填本机地址却连不上</td>
+<td><code>127.0.0.1</code> 是这台 Mac；连接云端请用实际 HTTPS 域名</td>
+</tr>
+<tr>
+<td>Mac 提示缺少辅助功能／屏幕录制</td>
+<td>给实际启动的终端／Python授权，退出终端后重开入口</td>
+</tr>
+<tr>
+<td>Mac 提示 Rosetta／Python 版本</td>
+<td>使用原生 Python 3.12 universal2 安装器，关闭终端 Rosetta；保留发送配置和账本，修正环境后重试</td>
+</tr>
+<tr>
+<td>Mac 窗口未找到或不唯一</td>
+<td>展开企微主窗口，关闭独立聊天窗口、弹窗，确认登录正确企业</td>
+</tr>
+<tr>
+<td>桌面等待空闲</td>
+<td>暂时停止键鼠操作，发送过程不要并行用电脑</td>
+</tr>
+<tr>
+<td>窗口尺寸与校准不同</td>
+<td>恢复原尺寸，或暂停发送后双击 Mac 的 <code>calibrate-sender.command</code> 重新校准</td>
+</tr>
+<tr>
+<td>校准标题区和消息区重叠</td>
+<td>缩小顶部群标题框，只框顶部群名，不能包含聊天正文</td>
+</tr>
+<tr>
+<td>搜索结果无唯一完整群名</td>
+<td>先在企微手动搜索；核对入群、重名、标点及校准区域；不要缩短为模糊群名</td>
+</tr>
+<tr>
+<td>已输入正文却没发出</td>
+<td>核对企微实际发送快捷键，重新校准；若结果不明先核对群内编号</td>
+</tr>
+<tr>
+<td>发送端在线但没发</td>
+<td>连接不等于可发送；看桌面就绪、自动发送、门店启用、手机号要求及负责群范围</td>
+</tr>
+<tr>
+<td>正式门店不发，测试群能发</td>
+<td>仍在用测试入口，或未选该正式群；重新选择范围并用正式入口</td>
+</tr>
+<tr>
+<td>接入令牌 401</td>
+<td>复制的是不是发送端令牌；连接的后台是不是正确库；全新云库的令牌与原本机不同</td>
+</tr>
+<tr>
+<td>抖音错误 2119013</td>
+<td>应用 IP 白名单需要实际云端出口 IP，不能只沿用 Windows 的 IP</td>
+</tr>
+<tr>
+<td>查到了订单却没有完整号码</td>
+<td>等关联线索；核对商户授权、解密权限和额度，必要时补录；打码文字不能直接还原</td>
+</tr>
+<tr>
+<td>订单“已完成”却没有核销消息</td>
+<td>看券履约状态、变化前快照、状态通知开关；完成与核销不一定相同</td>
+</tr>
+</tbody>
+</table>
+<p>Mac 可双击 <code>check-sender.command</code> 查看连接诊断；它只检查、不领取任务、不发消息。系统权限成功后，结果中的 <code>server_connected</code> 和 <code>ready</code> 都应为 <code>true</code>。</p>
+<h2 id="section-10">10 · 备份、更新和服务器资源检查</h2>
+<h3 id="section-7399f8c7">每次更新前</h3>
+<ol>
+<li>后台暂停自动同步和自动发送，等当前操作结束。</li>
+<li>停止发送端，核实待人工处理的消息。</li>
+<li>服务器备份；发送电脑另行备份 <code>sender-config.json</code> 和 <code>sender-data</code>。</li>
+</ol>
+<p>服务器更新命令：</p>
+<pre><code class="language-bash">cd /opt/laike-notify/laike-wecom-tool
+docker compose exec -T tool python manage.py backup --retain 7
+docker compose exec -T tool python manage.py check
+cd /opt/laike-notify
+git pull --ff-only origin feature/laike-wecom-tool
+cd laike-wecom-tool
+docker compose up -d --build
+curl --fail http://127.0.0.1:8790/health
+</code></pre>
+<p>Mac 通过 Git 获取的程序可在 <code>~/laike-notify</code> 执行 <code>git pull --ff-only origin feature/laike-wecom-tool</code>；ZIP 获取的程序先备份并保留配置和账本，再更新源码。不要用新安装包的空目录覆盖旧账本。Mac 双击入口会在依赖文件变化时更新依赖。</p>
+<p>更新后先看后台健康、门店绑定、号码配置、负责群范围和电脑就绪，再恢复任务。每日备份的定时配置和恢复详见 <a href="https://github.com/Ghostisme/beauty-notification-service/blob/feature/laike-wecom-tool/laike-wecom-tool/docs/%E9%83%A8%E7%BD%B2%E5%AE%9E%E6%B5%8B%E4%B8%8E%E6%97%A5%E5%B8%B8%E6%93%8D%E4%BD%9C%E5%85%A8%E6%B5%81%E7%A8%8B.md">部署、实测与日常操作全流程</a> 第 14 节。</p>
+<h3 id="section-715422e1">1 核 / 2 GiB 实际是否够用</h3>
+<p>在服务器空闲、同步中及业务高峰分别查看：</p>
+<pre><code class="language-bash">cd /opt/laike-notify/laike-wecom-tool
+free -h
+docker compose ps
+docker stats --no-stream
+docker compose logs --tail=80 tool
+</code></pre>
+<p>持续运行没有内存不足重启，一轮同步能在设置的间隔内完成，通知队列没有持续增长，后台打开正常，才算这台服务器在实际业务量下够用。5 Mbps 主要传接口文本和后台请求，OCR 在电脑端运行；发送端不会将桌面截图上传到服务器。门店和订单增加后，根据同步耗时、平台限频、队列积压和实际内存情况调整，而不是只看配置数字。</p>
+<h2 id="section-11">11 · 首次验收清单</h2>
+<p>操作人员逐项记录日期与结果；尚未执行的项目保持未勾选。</p>
+<ul>
+<li>[ ] 域名已经显示新后台，原账号可以登录，数据正确。</li>
+<li>[ ] 云端应用、商户查询和定时同步真实成功。</li>
+<li>[ ] Mac 已正常登录目标企微企业，并能手动找到测试外部群。</li>
+<li>[ ] Mac 两项权限、五步校准、窗口尺寸和发送快捷键已确认。</li>
+<li>[ ] 后台显示发送端在线且桌面就绪，范围只有计划负责的群。</li>
+<li>[ ] 一笔新真实订单的商品、金额、门店、群及完整号码有实际核对。</li>
+<li>[ ] 该条消息实际进入测试群，后台有发送结果，重复同步不重复发。</li>
+<li>[ ] 下一笔订单无需手动同步也能处理，记录了号码等待和发送时间。</li>
+<li>[ ] 新留资和每种准备启用的状态通知分别实际验证。</li>
+<li>[ ] 至少两家真实门店分别验证，消息没有串群。</li>
+<li>[ ] 停发送端、锁屏恢复、待核实处理与备份恢复已验证。</li>
+<li>[ ] 阿里云服务器在正常业务和高峰时资源正常。</li>
+</ul>
+<h2 id="section-5fa8caa5">查阅资料</h2>
+<ul>
+<li><a href="https://github.com/Ghostisme/beauty-notification-service/blob/feature/laike-wecom-tool/laike-wecom-tool/docs/%E9%83%A8%E7%BD%B2%E5%AE%9E%E6%B5%8B%E4%B8%8E%E6%97%A5%E5%B8%B8%E6%93%8D%E4%BD%9C%E5%85%A8%E6%B5%81%E7%A8%8B.md">完整部署与维护细节</a></li>
+<li><a href="https://github.com/Ghostisme/beauty-notification-service/blob/feature/laike-wecom-tool/laike-wecom-tool/docs/%E5%AE%8C%E6%95%B4%E6%89%8B%E6%9C%BA%E5%8F%B7%E7%9C%9F%E5%AE%9E%E6%A0%B8%E9%AA%8C.md">完整手机号真实核验记录</a></li>
+<li><a href="https://github.com/Ghostisme/beauty-notification-service/blob/feature/laike-wecom-tool/laike-wecom-tool/docs/Windows%E5%8F%91%E9%80%81%E7%AB%AF.md">Windows 发送端详细说明</a></li>
+<li><a href="https://github.com/Ghostisme/beauty-notification-service/blob/feature/laike-wecom-tool/laike-wecom-tool/docs/%E4%BC%81%E5%BE%AE%E5%A4%96%E9%83%A8%E5%AE%A2%E6%88%B7%E7%BE%A4%E5%8F%91%E9%80%81%E6%96%B9%E6%A1%88.md">企微外部客户群发送机制</a></li>
+<li><a href="https://developer.work.weixin.qq.com/document/path/92135">企业微信官方：创建企业群发</a></li>
+<li><a href="https://support.apple.com/zh-cn/guide/mac-help/mh43185/mac">Apple 官方：辅助功能授权</a></li>
+<li><a href="https://support.apple.com/zh-cn/guide/mac-help/mchld6aa7d23/mac">Apple 官方：录屏授权</a></li>
+</ul>
+<p>浏览器版内含相同操作步骤，可通过左侧目录定位，也可使用浏览器打印保存。日常操作人员主要阅读第 02、05、08、09 节；负责 Mac 安装的人依次执行第 03、05、06 节；服务器维护人员先完成第 01 节。</p></article><footer>手册版本：2026-10-13 · 代码分支 feature/laike-wecom-tool · 可用浏览器打印或保存</footer></main></div></body></html>

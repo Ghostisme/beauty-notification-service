@@ -1,3 +1,5 @@
 -r requirements.txt
 pytest>=8,<10
 psutil>=5.9
+Pillow>=12,<13
+Markdown>=3.7,<4

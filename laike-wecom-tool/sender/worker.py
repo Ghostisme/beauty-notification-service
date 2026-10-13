@@ -9,7 +9,8 @@ from pathlib import Path
 
 import requests
 
-from .desktop import BeforeSendError, UncertainSendError, WindowsDesktop
+from .desktop import BeforeSendError, UncertainSendError, create_desktop
+from .identity import sender_identity
 
 
 class Ledger:
@@ -47,12 +48,14 @@ class Worker:
         self.config=config
         self.base=config["server"].rstrip("/")
         self.token=config["token"]
-        self.id=config.get("worker_id","windows-wecom-1")
+        default_id, default_label = sender_identity()
+        self.id=config.get("worker_id",default_id)
+        self.label=config.get("label",default_label)
         self.stop=threading.Event()
         self.data=Path(config.get("data_dir","sender-data"));self.data.mkdir(parents=True,exist_ok=True)
         self.ledger=Ledger(self.data/"deliveries.db")
         profile_path=Path(config.get("profile","sender-data/desktop-profile.json"))
-        self.desktop=desktop or WindowsDesktop(json.loads(profile_path.read_text(encoding="utf-8")) if profile_path.exists() else {})
+        self.desktop=desktop or create_desktop(json.loads(profile_path.read_text(encoding="utf-8")) if profile_path.exists() else {})
         self.groups=[]
         self.readiness_detail="等待检查"
         self.groups_at=0
@@ -86,7 +89,7 @@ class Worker:
             ready=False
             detail="没有匹配的接收群配置，请在后台绑定本发送端负责的门店群"
         self.readiness_detail=detail
-        self.request("/api/relay/heartbeat",{"worker_id":self.id,"label":self.config.get("label","Windows 企微发送端"),"ready":ready,"detail":detail,"groups":groups})
+        self.request("/api/relay/heartbeat",{"worker_id":self.id,"label":self.label,"ready":ready,"detail":detail,"groups":groups})
         return ready
 
     def heartbeat_loop(self):
@@ -127,7 +130,8 @@ class Worker:
                 row=self.ledger.get(key)
                 result={"status":"uncertain" if row and row["state"]=="sending" else "failed",
                         "detail":"发送端操作中断："+type(e).__name__,"group_id":group}
-        receipt={"message_id":job["id"],"lease_token":job["lease_token"],**result,"remote_id":"windows-ledger:"+key}
+        prefix=getattr(self.desktop,"platform_name","windows")
+        receipt={"message_id":job["id"],"lease_token":job["lease_token"],**result,"remote_id":prefix+"-ledger:"+key}
         self.ledger.update(key,group,result["status"],receipt,pending=True)
         self.logger.info("任务 %s：%s",job["id"],result["status"])
         self.flush_receipts()

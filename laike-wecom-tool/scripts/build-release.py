@@ -8,7 +8,9 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 FILES=['README.md','run.py','sender.py','manage.py','requirements.txt','requirements.lock',
        'requirements-dev.txt','requirements-sender.txt','requirements-sender.lock','package.json','Dockerfile','compose.yaml',
-       '.gitignore','.dockerignore','start-demo.bat','start-server.bat','start-sender.bat','start-test-sender.bat']
+       '.gitignore','.dockerignore','start-demo.bat','start-server.bat','start-sender.bat','start-test-sender.bat',
+       'requirements-sender-macos.lock','start-sender.command','start-test-sender.command',
+       'calibrate-sender.command','check-sender.command','select-sender-groups.command','select-sender-groups.bat']
 DIRECTORIES=['toolbox','sender','deploy','docs','tests','scripts']
 EVIDENCE=['dashboard.png','templates.png','manual-review.png','mobile.png','benchmark.json',
           'browser-check.json','windows-sender-check.json','release-smoke.json','tests.xml','test-group.png']

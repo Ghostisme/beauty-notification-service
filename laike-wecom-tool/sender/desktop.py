@@ -1,4 +1,4 @@
-"""企微 Windows 界面发送：校准区域、精确核对群名、发送后检查消息。
+"""企微桌面发送的共同确认流程，以及 Windows 界面驱动。
 
 此模块不注入客户端、不读取客户端数据库。OCR 只在已校准的窗口区域运行。
 """
@@ -6,6 +6,7 @@ import re
 import math
 import time
 import unicodedata
+import sys
 
 
 class BeforeSendError(RuntimeError):
@@ -35,7 +36,7 @@ def confirmation_anchors(body):
         raise BeforeSendError("消息内容为空")
     identifiers = [v for v in lines if v.startswith(("订单编号：", "订单编号:", "留资编号：", "留资编号:"))]
     if not identifiers:
-        raise BeforeSendError("Windows 发送确认需要模板保留订单编号或留资编号")
+        raise BeforeSendError("桌面发送确认需要模板保留订单编号或留资编号")
     critical = [v for v in lines if v.startswith(("状态变化：", "状态变化:", "变化时间：", "变化时间:", "留资时间：", "留资时间:", "下单时间：", "下单时间:"))]
     return [compact(v) for v in [lines[0], *critical, *identifiers]]
 
@@ -92,11 +93,81 @@ def profile_problem(profile, complete=True):
     return ""
 
 
-class WindowsDesktop:
+class DesktopSender:
+    """两种平台共用群名核对、发送前记账与发送后确认，避免平台间行为分叉。"""
+    def _verify_header(self, hwnd, expected):
+        results = self._read(hwnd, "header_rect")
+        if not any(exact_group(row[1], expected, title=True) for row in results):
+            raise BeforeSendError("群标题与目标群名不完全一致，本次未发送；请检查群名或校准范围")
+
+    def send(self, job, before_submit):
+        ready, detail = self.ready()
+        if not ready:
+            raise BeforeSendError(detail)
+        anchors = confirmation_anchors(job["text"])
+        hwnd = self.find_window()
+        self._foreground(hwnd)
+        previous_clipboard = self._clipboard()
+        submitted = False
+        try:
+            self._click(hwnd, self.profile["search_point"])
+            self._select_all(hwnd)
+            self._clipboard(job["group_name"])
+            self._paste(hwnd)
+            time.sleep(self.profile.get("search_wait_seconds", 2.5))
+            results = self._read(hwnd, "results_rect")
+            matches = [r for r in results if exact_group(r[1], job["group_name"], title=True)]
+            if len(matches) != 1:
+                raise BeforeSendError("搜索结果没有唯一的完整群名匹配，本次未发送")
+            points = matches[0][0]
+            rect = self.profile["results_rect"]
+            target = (rect[0] + sum(p[0] for p in points)/len(points), rect[1] + sum(p[1] for p in points)/len(points))
+            self._click(hwnd, target)
+            time.sleep(1)
+            self._verify_header(hwnd, job["group_name"])
+            history_before = "\n".join(r[1] for r in self._read(hwnd, "messages_rect"))
+            if has_confirmation(history_before, anchors):
+                raise UncertainSendError("群内已出现相同编号与事件信息，为避免重复发送，请人工核实")
+            self._click(hwnd, self.profile["input_point"])
+            self._select_all(hwnd)
+            self._clipboard(job["text"])
+            self._paste(hwnd)
+            time.sleep(0.5)
+            self._verify_header(hwnd, job["group_name"])
+            if not self._focused(hwnd):
+                raise BeforeSendError("发送前企微焦点丢失，本次未发送")
+            before_submit()  # 先持久化本地发送中状态，再点击发送，保证崩溃后不盲目重发。
+            submitted = True
+            self._submit(hwnd)
+            deadline = time.monotonic() + self.profile.get("confirmation_seconds", 18)
+            while time.monotonic() < deadline:
+                time.sleep(1.5)
+                self._verify_header(hwnd, job["group_name"])
+                history = "\n".join(r[1] for r in self._read(hwnd, "messages_rect"))
+                if has_confirmation(history, anchors):
+                    return {"status": "sent", "detail": "已核对目标群标题及群内消息编号、事件信息", "group_id": job["group_id"]}
+            raise UncertainSendError("已点击发送，但未能完整识别群内消息，请人工核实")
+        except UncertainSendError:
+            raise
+        except Exception as e:
+            if submitted:
+                raise UncertainSendError("发送后确认中断，请核实目标群消息") from e
+            if isinstance(e, BeforeSendError):
+                raise
+            raise BeforeSendError(f"发送前操作未完成：{type(e).__name__}") from e
+        finally:
+            try:
+                self._clipboard(previous_clipboard if previous_clipboard is not None else "")
+            except Exception:
+                pass
+
+
+class WindowsDesktop(DesktopSender):
+    platform_name = "windows"
     def __init__(self, profile):
         import os
         if os.name != "nt":
-            raise RuntimeError("企微桌面发送端只支持 Windows；云端服务支持 Linux")
+            raise RuntimeError("Windows 驱动需要在 Windows 运行")
         import ctypes
         from ctypes import wintypes
         import win32api
@@ -161,7 +232,7 @@ class WindowsDesktop:
             return False, "Windows 桌面已锁定，请保持发送电脑会话可交互"
         try:
             hwnd = self.find_window()
-            problem = profile_problem(self.profile)
+            problem = self.profile_platform_problem() or profile_problem(self.profile)
             if problem:
                 return False, problem
             if self.win32gui.IsIconic(hwnd):
@@ -237,71 +308,44 @@ class WindowsDesktop:
         result, _ = self._ocr(np.asarray(image.convert("RGB"))[:,:,::-1].copy())
         return result or []
 
-    def _verify_header(self, hwnd, expected):
-        results = self._read(hwnd, "header_rect")
-        if not any(exact_group(row[1], expected, title=True) for row in results):
-            raise BeforeSendError("群标题与目标群名不完全一致，本次未发送；请检查群名或校准范围")
+    def profile_platform_problem(self):
+        if self.profile.get("platform", "win32") != "win32":
+            return "此校准文件来自另一种系统，请在当前电脑重新校准"
+        return ""
 
-    def send(self, job, before_submit):
-        ready, detail = self.ready()
-        if not ready:
-            raise BeforeSendError(detail)
-        anchors = confirmation_anchors(job["text"])
-        hwnd = self.find_window()
-        self._foreground(hwnd)
-        previous_clipboard = self._clipboard()
-        submitted = False
-        try:
-            self._click(hwnd, self.profile["search_point"])
-            self._key(self.win32con.VK_CONTROL, ord("A"))
-            self._clipboard(job["group_name"])
-            self._key(self.win32con.VK_CONTROL, ord("V"))
-            time.sleep(self.profile.get("search_wait_seconds", 2.5))
-            results = self._read(hwnd, "results_rect")
-            matches = [r for r in results if exact_group(r[1], job["group_name"], title=True)]
-            if len(matches) != 1:
-                raise BeforeSendError("搜索结果没有唯一的完整群名匹配，本次未发送")
-            points = matches[0][0]
-            rect = self.profile["results_rect"]
-            target = (rect[0] + sum(p[0] for p in points)/len(points), rect[1] + sum(p[1] for p in points)/len(points))
-            self._click(hwnd, target)
-            time.sleep(1)
-            self._verify_header(hwnd, job["group_name"])
-            history_before = "\n".join(r[1] for r in self._read(hwnd, "messages_rect"))
-            if has_confirmation(history_before, anchors):
-                raise UncertainSendError("群内已出现相同编号与事件信息，为避免重复发送，请人工核实")
-            self._click(hwnd, self.profile["input_point"])
-            self._key(self.win32con.VK_CONTROL, ord("A"))
-            self._clipboard(job["text"])
-            self._key(self.win32con.VK_CONTROL, ord("V"))
-            time.sleep(0.5)
-            self._verify_header(hwnd, job["group_name"])
-            if self.win32gui.GetForegroundWindow() != hwnd:
-                raise BeforeSendError("发送前企微焦点丢失，本次未发送")
-            before_submit()  # 先持久化本地发送中状态，再点击发送，保证崩溃后不盲目重发。
-            submitted = True
-            if self.profile.get("send_shortcut", "enter") == "ctrl-enter":
-                self._key(self.win32con.VK_CONTROL, self.win32con.VK_RETURN)
-            else:
-                self._key(self.win32con.VK_RETURN)
-            deadline = time.monotonic() + self.profile.get("confirmation_seconds", 18)
-            while time.monotonic() < deadline:
-                time.sleep(1.5)
-                self._verify_header(hwnd, job["group_name"])
-                history = "\n".join(r[1] for r in self._read(hwnd, "messages_rect"))
-                if has_confirmation(history, anchors):
-                    return {"status": "sent", "detail": "已核对目标群标题及群内消息编号、事件信息", "group_id": job["group_id"]}
-            raise UncertainSendError("已点击发送，但未能完整识别群内消息，请人工核实")
-        except UncertainSendError:
-            raise
-        except Exception as e:
-            if submitted:
-                raise UncertainSendError("发送后确认中断，请核实目标群消息") from e
-            if isinstance(e, BeforeSendError):
-                raise
-            raise BeforeSendError(f"发送前操作未完成：{type(e).__name__}") from e
-        finally:
-            try:
-                self._clipboard(previous_clipboard if previous_clipboard is not None else "")
-            except Exception:
-                pass
+    def window_rect(self, hwnd):
+        return self.win32gui.GetWindowRect(hwnd)
+
+    def capture_window(self, hwnd):
+        return self.grab(bbox=self.window_rect(hwnd), all_screens=True)
+
+    def _focused(self, hwnd):
+        return self.win32gui.GetForegroundWindow() == hwnd
+
+    def _select_all(self, hwnd):
+        if not self._focused(hwnd):
+            raise BeforeSendError("企微焦点丢失，本次未发送")
+        self._key(self.win32con.VK_CONTROL, ord("A"))
+
+    def _paste(self, hwnd):
+        if not self._focused(hwnd):
+            raise BeforeSendError("企微焦点丢失，本次未发送")
+        self._key(self.win32con.VK_CONTROL, ord("V"))
+
+    def _submit(self, hwnd):
+        if not self._focused(hwnd):
+            raise BeforeSendError("发送前企微焦点丢失")
+        if self.profile.get("send_shortcut", "enter") == "ctrl-enter":
+            self._key(self.win32con.VK_CONTROL, self.win32con.VK_RETURN)
+        else:
+            self._key(self.win32con.VK_RETURN)
+
+
+def create_desktop(profile, platform=None):
+    platform = sys.platform if platform is None else platform
+    if platform == "win32":
+        return WindowsDesktop(profile)
+    if platform == "darwin":
+        from .macos import MacDesktop
+        return MacDesktop(profile)
+    raise RuntimeError("企微桌面发送端请在 Windows 或 Mac 上运行；Linux 只运行云端后台")
